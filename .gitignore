@@ -1,0 +1,16 @@
+# Song audio and tabs are copyrighted: keep them out of the repo.
+songs/
+*.wav
+*.m4a
+*.mp3
+*.flac
+*.gp
+*.gp3
+*.gp4
+*.gp5
+*.gpx
+*.zip
+node_modules/
+__pycache__/
+.DS_Store
+test-results/
