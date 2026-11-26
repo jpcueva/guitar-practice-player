@@ -455,9 +455,13 @@ async function togglePlay() {
     await engine.play({ countInBeats: countIn ? Math.round(bpb) : 0 });
   }
 }
+engine.addEventListener('blocked', () => {
+  toast("The iPhone didn't start the audio. Tap Play again. If it keeps happening, close the app fully (swipe it away) and open it again.", 7000);
+});
 engine.addEventListener('state', () => {
-  $('#icoPlay').hidden = engine.playing;
-  $('#icoPause').hidden = !engine.playing;
+  // SVG elements have no .hidden property, so set the attribute itself.
+  $('#icoPlay').toggleAttribute('hidden', engine.playing);
+  $('#icoPause').toggleAttribute('hidden', !engine.playing);
   $('#btnPlay').setAttribute('aria-label', engine.playing ? 'Pause' : 'Play');
 });
 

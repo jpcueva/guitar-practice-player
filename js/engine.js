@@ -40,6 +40,17 @@ export class Engine extends EventTarget {
     if (sampleRate) opts.sampleRate = sampleRate;
     try { this.ctx = new AC(opts); } catch { this.ctx = new AC(); }
     const c = this.ctx;
+    // A phone call, Siri or another app can interrupt the audio. Pause so the
+    // position and the play button stay true, instead of freezing mid-play.
+    c.addEventListener?.('statechange', () => {
+      if (c.state !== 'running' && this.playing) {
+        this.anchorPos = this.position;
+        this.playing = false;
+        clearInterval(this._timer);
+        this._killSources();
+        this.dispatchEvent(new Event('state'));
+      }
+    });
     this.bus = c.createGain();
     this.dry = c.createGain();
     this.wet = c.createGain();
@@ -73,9 +84,27 @@ export class Engine extends EventTarget {
   /** Must run inside a user gesture on iOS. */
   async unlock() {
     if (!this.ctx) await this.init();
+    // iOS before 16.4 has no audioSession API: there, a looping silent <audio>
+    // element switches the session to "playback" so the silent switch doesn't
+    // mute Web Audio. On newer iOS that element takes over the audio session and
+    // leaves the AudioContext "interrupted" (nothing plays until the app is
+    // closed), so it is only used when audioSession is missing.
+    if (!navigator.audioSession && /iP(hone|ad|od)|Macintosh/.test(navigator.userAgent) && !this._unlockedEl) {
+      try {
+        const el = new Audio(SILENT_WAV);
+        el.setAttribute('playsinline', '');
+        el.loop = true;
+        el.volume = 0.0001;
+        const p = el.play();
+        this._unlockedEl = el;
+        p?.catch?.(() => { this._unlockedEl = null; });
+      } catch {}
+    }
+    try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch {}
     if (this.ctx.state !== 'running') {
       this._started = false; // output was stopped (or interrupted), so it has to wake up again
-      try { await this.ctx.resume(); } catch {}
+      // resume() can hang on iOS; don't wait for it forever
+      try { await Promise.race([this.ctx.resume(), new Promise(r => setTimeout(r, 1500))]); } catch {}
     }
     // A silent source keeps the output running between plays, so a later start
     // is not clipped while the audio hardware wakes up again.
@@ -88,18 +117,7 @@ export class Engine extends EventTarget {
         this._keepAlive = k;
       } catch {}
     }
-    // Older iOS: playing an <audio> element switches the session to "playback",
-    // so the silent switch does not mute Web Audio.
-    if (!this._unlockedEl) {
-      try {
-        const el = new Audio(SILENT_WAV);
-        el.setAttribute('playsinline', '');
-        el.loop = true;
-        el.volume = 0.0001;
-        await el.play();
-        this._unlockedEl = el;
-      } catch {}
-    }
+    return this.ctx.state === 'running';
   }
 
   async decode(blob) {
@@ -200,8 +218,13 @@ export class Engine extends EventTarget {
 
   async play({ countInBeats = 0 } = {}) {
     if (!this.stems.length) return;
-    await this.unlock();
+    const ok = await this.unlock();
     if (this.playing) return;
+    if (!ok) {
+      // The clock would not move, so nothing would play; tell the UI instead.
+      this.dispatchEvent(new Event('blocked'));
+      return;
+    }
     let pos = this.anchorPos;
     if (this.loop.enabled && (pos < this.loop.a || pos >= this.loop.b)) pos = this.loop.a;
     if (pos >= this.duration - 0.05) pos = this.loop.enabled ? this.loop.a : 0;
