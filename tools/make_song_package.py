@@ -5,11 +5,12 @@
         --artist Trivium --tab "Like Light To The Flies.gp" --out songs/
 
 Input is a Moises export: the .zip, or the folder of WAVs. Each stem is converted to
-AAC (.m4a, 192 kbps), which makes a 5-minute song about 70 MB instead of 420 MB.
+FLAC by default: lossless (sounds exactly like the WAV) at roughly half the size.
+--codec aac makes AAC .m4a instead (much smaller, slightly lossy).
 The "metronome" stem is not kept as audio: its clicks become the beat grid in
 song.json, and the app plays its own click on that grid.
 
-Output: <out>/<song-id>.zip holding song.json, stems/*.m4a and the tab (if given).
+Output: <out>/<song-id>.zip holding song.json, stems/*.flac (or *.m4a) and the tab (if given).
 Import it in the app with Songs -> Add song.
 
 Needs: ffmpeg on PATH, numpy.
@@ -96,7 +97,9 @@ def main():
     ap.add_argument("--tab", help="Guitar Pro (.gp/.gp5/.gpx) or MusicXML file")
     ap.add_argument("--title")
     ap.add_argument("--artist", default="")
-    ap.add_argument("--bitrate", default="192k")
+    ap.add_argument("--codec", choices=["flac", "aac"], default="flac",
+                    help="flac = lossless, about half the WAV size (default); aac = small, slightly lossy")
+    ap.add_argument("--bitrate", default="256k", help="AAC bitrate (only with --codec aac)")
     ap.add_argument("--out", default=".")
     args = ap.parse_args()
 
@@ -138,10 +141,14 @@ def main():
             print(f"beats   <- {p.name}")
             meta["beats"] = detect_beats(p, bpm)
             continue
-        out = pkg / "stems" / f"{stem}.m4a"
+        if args.codec == "flac":
+            out = pkg / "stems" / f"{stem}.flac"
+            enc = ["-c:a", "flac", "-compression_level", "8"]
+        else:
+            out = pkg / "stems" / f"{stem}.m4a"
+            enc = ["-c:a", "aac", "-b:a", args.bitrate, "-movflags", "+faststart"]
         print(f"encode  {p.name} -> stems/{out.name}")
-        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(p), "-vn", "-c:a", "aac", "-b:a", args.bitrate,
-                        "-movflags", "+faststart", str(out)], check=True)
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(p), "-vn", *enc, str(out)], check=True)
         meta["stems"].append({"id": stem, "name": STEM_NAMES.get(stem, stem.replace("_", " ").capitalize()),
                               "file": f"stems/{out.name}"})
     meta["stems"].sort(key=lambda s: STEM_ORDER.index(s["id"]) if s["id"] in STEM_ORDER else 99)

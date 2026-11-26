@@ -76,6 +76,20 @@ export async function deleteSong(id) {
   }));
 }
 
+/** Delete the song's files for which shouldDelete(path) is true; the song record stays. */
+export async function deleteFiles(id, shouldDelete) {
+  await tx(['files'], 'readwrite', t => new Promise((resolve) => {
+    const idx = t.objectStore('files').index('songId');
+    const cur = idx.openCursor(IDBKeyRange.only(id));
+    cur.onsuccess = () => {
+      const c = cur.result;
+      if (!c) return resolve();
+      if (shouldDelete(c.value.path)) c.delete();
+      c.continue();
+    };
+  }));
+}
+
 export async function storageInfo() {
   const out = { usage: null, quota: null, persisted: null };
   try {

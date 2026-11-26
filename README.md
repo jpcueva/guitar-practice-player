@@ -22,14 +22,16 @@ A practice app for playing along with songs, in the spirit of Moises, with the g
 
 Song audio comes from a Moises export ("HiFi" separation, with the **metronome** stem included). There are two ways to bring it in:
 
-**A. Compressed package (best for phones).** This turns ~420 MB of WAVs into ~50 MB:
+**A. Song package (best for phones).** Stems are stored as lossless FLAC, which sounds exactly like the WAVs at about 40% of the size (a 5–6 minute song is about 130–150 MB). Add `--codec aac` for a much smaller, slightly lossy package (about 50 MB):
 
 ```bash
 python tools/make_song_package.py "Like Light to the Flies-D minor-106bpm-441hz.zip" \
     --artist Trivium --tab "like-light-to-the-flies.gp" --out songs/
 ```
 
-You need `ffmpeg` and `numpy` installed. The script converts each stem to AAC and turns the metronome stem into a beat grid.
+You need `ffmpeg` and `numpy` installed. The script converts each stem to FLAC (or AAC) and turns the metronome stem into a beat grid. Adding a package for a song that's already in the app replaces its audio, and keeps a tab you attached and your settings.
+
+The app plays from decoded audio in memory, so FLAC and AAC use the same memory while playing. On an iPhone the stems are mixed down to mono by default to save memory. Turn on **⚙ Settings → Keep stereo** for full stereo, and turn it off again if the app reloads on its own.
 
 **B. Direct import.** Pick the Moises `.zip`, or all its WAV files, in **Add song**. The app finds the beats from the metronome stem itself. This is fine on a computer, but heavy on a phone.
 
