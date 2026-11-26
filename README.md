@@ -6,7 +6,9 @@ A practice app for playing along with songs, in the spirit of Moises, with the g
 - **Tempo:** 50–125% without changing the pitch.
 - **Loops:** tap a section (Verse, Chorus, Solo…) to jump and select it, long-press another section to extend the selection, or set A/B at any bar.
 - **Sections:** taken from the tab's section marks. Songs whose tab has none get a built-in map (`js/known-sections.js`), and you can rename or add sections under **⚙ Settings → Sections**.
-- **Tab:** Guitar Pro or MusicXML tabs, with a cursor that follows the recording, a track picker, and page or one-line layout. Tap a bar to jump to it.
+- **Tab:** Guitar Pro or MusicXML tabs, with a cursor that follows the recording, and page or one-line layout. Tap a bar to jump to it.
+- **Several parts at once:** pick **Several parts…** in the part menu (or **⚙ Settings → Parts on screen**) to stack guitars and bass as one-line tabs that scroll together, in the order you choose. PDF tabs work too: in one-line layout each bar is cut out of the pages and lined up per part.
+- **Per-song settings:** tempo, mixer, loop, click, sync, sections, parts, layout and size are saved for each song on that device. **⚙ Settings → Export settings** saves them all in one file (on an iPhone, Save to Files → Google Drive), and **Import settings** loads that file on another device.
 - **Click and count-in:** a metronome on the song's real beat grid, which follows its tempo changes.
 
 ## Using it on an iPhone

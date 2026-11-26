@@ -172,6 +172,11 @@
       <button class="chip-btn toggle" data-layout="page">Page</button>
       <button class="chip-btn toggle" data-layout="horizontal">One line</button>
     </div>
+    <div id="partsBlock" hidden>
+      <h3>Parts on screen</h3>
+      <p class="hint">Tick the parts to show. They're stacked top to bottom in this order and scroll together. Use “One line” layout to play along with several parts. PDF tabs show only the top part in Page layout.</p>
+      <div id="partsEdit" class="parts-edit"></div>
+    </div>
     <div class="row-ctl">
       <span>Size</span>
       <button class="chip-btn" data-zoom="-0.1">A−</button>
@@ -180,6 +185,13 @@
     </div>
     <h3>Audio</h3>
     <label class="check"><input type="checkbox" id="optStereo" /> Keep stereo (uses twice the memory; turn off if the app reloads on its own)</label>
+    <h3>Move settings to another device</h3>
+    <p class="hint">Export saves every song's settings (tempo, mixer, loops, sync, sections, parts, layout) in one small file. On an iPhone, choose <b>Save to Files</b> and pick Google Drive. On the other device, tap Import and open that file. Songs you haven't added there yet are skipped.</p>
+    <div class="row-ctl">
+      <button class="chip-btn" id="btnExportPrefs">Export settings</button>
+      <button class="chip-btn" id="btnImportPrefs">Import settings</button>
+      <input type="file" id="fileImportPrefs" accept=".json,application/json" hidden />
+    </div>
     <p class="hint small">alphaTab renders the tab. Signalsmith Stretch keeps the pitch when you change tempo.</p>
   </div>
 

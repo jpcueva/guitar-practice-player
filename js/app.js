@@ -62,6 +62,9 @@ function prefs() {
   song.prefs ||= {};
   return song.prefs;
 }
+// Tab layout and size are saved per song; the last choice is the default for new songs.
+const songLayout = () => (song?.prefs?.layout) || globalPrefs.layout;
+const songScale = () => (song?.prefs?.scale) || globalPrefs.scale;
 
 // ---------------- sheets ----------------
 
@@ -197,13 +200,13 @@ async function openSong(id) {
       const blob = await lib.getFile(song.id, song.tab);
       gpView.destroy(); pdfView.destroy();
       tab = /\.json$/i.test(song.tab) ? pdfView : gpView;
-      tab.layout = globalPrefs.layout;
-      tab.scale = globalPrefs.scale;
-      $('#tabHost').classList.toggle('horizontal', tab === gpView && globalPrefs.layout === 'horizontal');
+      tab.layout = songLayout();
+      tab.scale = songScale();
+      $('#tabHost').classList.toggle('horizontal', tab === gpView && songLayout() === 'horizontal');
       try {
         const info = tab === pdfView
-          ? await withTimeout(pdfView.load(JSON.parse(await blob.text()), p.trackIndex ?? null, (path) => lib.getFile(song.id, path)), 30000)
-          : await withTimeout(gpView.load(await blob.arrayBuffer(), p.trackIndex ?? null), 30000);
+          ? await withTimeout(pdfView.load(JSON.parse(await blob.text()), p.trackIndexes?.length ? p.trackIndexes : p.trackIndex ?? null, (path) => lib.getFile(song.id, path)), 30000)
+          : await withTimeout(gpView.load(await blob.arrayBuffer(), p.trackIndexes?.length ? p.trackIndexes : p.trackIndex ?? null), 30000);
         barDefs = info.barDefs;
         const alignKey = `${song.tab}:${barDefs.length}`;
         if (song.sync.alignedFor !== alignKey && song.beats?.length > 8) {
@@ -216,6 +219,7 @@ async function openSong(id) {
         }
         tracks = info.tracks;
         p.trackIndex = info.trackIndex;
+        p.trackIndexes = info.trackIndexes || [info.trackIndex];
         if (!song.artist && info.artist) { song.artist = info.artist; $('#songSub').textContent = [song.artist, song.key].filter(Boolean).join(' · '); }
       } catch (err) {
         console.error(err);
@@ -263,19 +267,24 @@ function renderTrackSelect() {
   const sel = $('#trackSelect');
   sel.hidden = tracks.length < 1;
   sel.innerHTML = '';
-  for (const t of tracks) {
-    const o = document.createElement('option');
-    o.value = t.index;
-    o.textContent = t.name;
-    sel.appendChild(o);
-  }
-  sel.value = prefs().trackIndex ?? 0;
+  const shown = song ? shownParts() : [];
+  const add = (value, text) => { const o = document.createElement('option'); o.value = value; o.textContent = text; sel.appendChild(o); return o; };
+  if (shown.length > 1) add('multi', `${shown.length} parts`);
+  for (const t of tracks) if (t.strings > 0) add(t.index, t.name);
+  if (tracks.filter(t => t.strings > 0).length > 1) add('pick', 'Several parts…');
+  sel.value = shown.length > 1 ? 'multi' : String(prefs().trackIndex ?? 0);
 }
 $('#trackSelect').addEventListener('change', (e) => {
-  const i = +e.target.value;
-  prefs().trackIndex = i;
-  saveSongSoon();
-  tab.setTrack(i);
+  const v = e.target.value;
+  if (v === 'multi') return;
+  if (v === 'pick') {
+    renderTrackSelect();
+    openSheet('#settings');
+    $('#partsBlock').scrollIntoView({ block: 'start' });
+    return;
+  }
+  const i = +v;
+  setParts([i]);
 });
 for (const v of [gpView, pdfView]) v.addEventListener('rendered', () => { lastUi.mi = -1; showLoopOnTab(); });
 const onBarClick = (e) => {
@@ -593,8 +602,9 @@ function renderSettings() {
   $('#bpbRow').hidden = !!barDefs;
   $('#autoRow').hidden = !barDefs;
   $('#alignScore').textContent = barDefs && song?.sync.alignScore != null ? `${song.sync.alignScore}% of the tab's beats match a click in the recording.` : '';
-  $('#zoomVal').textContent = `${Math.round(globalPrefs.scale * 100)}%`;
-  document.querySelectorAll('[data-layout]').forEach(b => setPressed(b, b.dataset.layout === globalPrefs.layout));
+  $('#zoomVal').textContent = `${Math.round(songScale() * 100)}%`;
+  document.querySelectorAll('[data-layout]').forEach(b => setPressed(b, b.dataset.layout === songLayout()));
+  renderPartsEditor();
   $('#optStereo').checked = !!globalPrefs.stereo;
   renderSectionEditor();
 }
@@ -704,15 +714,127 @@ function resync() {
 document.querySelectorAll('[data-layout]').forEach(b => b.addEventListener('click', () => {
   globalPrefs.layout = b.dataset.layout;
   saveGlobalPrefs();
-  tab.setLayout(globalPrefs.layout);
+  if (song) { prefs().layout = b.dataset.layout; saveSongSoon(); }
+  tab.setLayout(songLayout());
   renderSettings();
 }));
 document.querySelectorAll('[data-zoom]').forEach(b => b.addEventListener('click', () => {
-  globalPrefs.scale = Math.max(0.6, Math.min(1.8, Math.round((globalPrefs.scale + +b.dataset.zoom) * 10) / 10));
+  const sc = Math.max(0.6, Math.min(1.8, Math.round((songScale() + +b.dataset.zoom) * 10) / 10));
+  globalPrefs.scale = sc;
   saveGlobalPrefs();
-  tab.setLayout(null, globalPrefs.scale);
+  if (song) { prefs().scale = sc; saveSongSoon(); }
+  tab.setLayout(null, sc);
   renderSettings();
 }));
+
+// ---------------- settings export / import ----------------
+// A plain JSON file the person saves anywhere (Google Drive through the iOS
+// Files sheet, a download on a computer) and opens on another device.
+
+const PREF_KEYS = ['prefs', 'sync', 'customSections'];
+
+$('#btnExportPrefs').addEventListener('click', async () => {
+  const all = await lib.listSongs();
+  const out = { app: 'guitar-practice-player', kind: 'settings', version: 1, exportedAt: new Date().toISOString(), songs: {} };
+  for (const sg of all) {
+    const rec = { title: sg.title };
+    for (const k of PREF_KEYS) if (sg[k] !== undefined) rec[k] = sg[k];
+    out.songs[sg.id] = rec;
+  }
+  const name = 'guitar-practice-settings.json';
+  const file = new File([JSON.stringify(out, null, 1)], name, { type: 'application/json' });
+  try {
+    if (navigator.canShare?.({ files: [file] })) {
+      await navigator.share({ files: [file], title: 'Guitar practice settings' });
+      return toast('Settings exported.');
+    }
+  } catch (e) {
+    if (e?.name === 'AbortError') return;
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(file);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  toast(`Settings saved as ${name}.`);
+});
+
+$('#btnImportPrefs').addEventListener('click', () => $('#fileImportPrefs').click());
+$('#fileImportPrefs').addEventListener('change', async (e) => {
+  const f = e.target.files?.[0];
+  e.target.value = '';
+  if (!f) return;
+  let data;
+  try { data = JSON.parse(await f.text()); } catch { return toast("That file isn't a settings export."); }
+  if (data?.kind !== 'settings' || typeof data.songs !== 'object') return toast("That file isn't a settings export.");
+  let applied = 0, skipped = [];
+  for (const [id, rec] of Object.entries(data.songs)) {
+    const sg = await lib.getSong(id);
+    if (!sg) { skipped.push(rec.title || id); continue; }
+    for (const k of PREF_KEYS) {
+      if (rec[k] === undefined) delete sg[k];
+      else sg[k] = rec[k];
+    }
+    await lib.putSong(sg);
+    applied++;
+  }
+  toast(`Imported settings for ${applied} song${applied === 1 ? '' : 's'}.` + (skipped.length ? ` Not on this device: ${skipped.join(', ')}.` : ''), 6000);
+  if (song && data.songs[song.id]) { closeSheets(); clearTimeout(saveTimer); openSong(song.id); }
+});
+
+// ---------------- parts (stacked tabs) ----------------
+
+function shownParts() {
+  const p = prefs();
+  return p.trackIndexes?.length ? p.trackIndexes.slice() : [p.trackIndex ?? 0];
+}
+
+function setParts(list) {
+  if (!list.length) return toast('Keep at least one part on screen.');
+  const p = prefs();
+  p.trackIndexes = list;
+  p.trackIndex = list[0];
+  saveSongSoon();
+  tab.setTracks(list);
+  renderTrackSelect();
+  renderPartsEditor();
+}
+
+function renderPartsEditor() {
+  const host = $('#partsEdit');
+  const usable = tracks.filter(t => t.strings > 0);
+  $('#partsBlock').hidden = usable.length < 2;
+  host.innerHTML = '';
+  if (usable.length < 2) return;
+  const shown = shownParts();
+  const order = [...shown.map(i => usable.find(t => t.index === i)).filter(Boolean), ...usable.filter(t => !shown.includes(t.index))];
+  order.forEach((t) => {
+    const on = shown.includes(t.index);
+    const pos = shown.indexOf(t.index);
+    const row = document.createElement('div');
+    row.className = 'part-row' + (on ? ' on' : '');
+    row.innerHTML = `<label><input type="checkbox"><span></span></label><button class="icon-btn" data-dir="-1" aria-label="Move up">↑</button><button class="icon-btn" data-dir="1" aria-label="Move down">↓</button>`;
+    row.querySelector('span').textContent = t.name;
+    const cb = row.querySelector('input');
+    cb.checked = on;
+    cb.addEventListener('change', () => {
+      const l = shownParts().filter(i => i !== t.index);
+      if (cb.checked) l.push(t.index);
+      setParts(l);
+    });
+    const up = row.querySelector('[data-dir="-1"]'), down = row.querySelector('[data-dir="1"]');
+    up.disabled = !on || pos === 0;
+    down.disabled = !on || pos === shown.length - 1;
+    for (const btn of [up, down]) btn.addEventListener('click', () => {
+      const l = shownParts();
+      const j = pos + +btn.dataset.dir;
+      [l[pos], l[j]] = [l[j], l[pos]];
+      setParts(l);
+    });
+    host.appendChild(row);
+  });
+}
 $('#optStereo').addEventListener('change', (e) => {
   globalPrefs.stereo = e.target.checked;
   saveGlobalPrefs();
