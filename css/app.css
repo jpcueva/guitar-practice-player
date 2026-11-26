@@ -177,3 +177,7 @@ input[type=range]::-moz-range-thumb { width: 20px; height: 20px; border-radius: 
 .part-row input { width: 20px; height: 20px; accent-color: #f59e0b; }
 .part-row .icon-btn:disabled { opacity: .25; }
 .tab-part-label { position: absolute; z-index: 3; font-size: 11px; line-height: 1; padding: 3px 6px; border-radius: 6px; background: rgba(15,23,42,.85); color: #f59e0b; pointer-events: none; white-space: nowrap; }
+
+.pdf-strip { position: relative; }
+.pdf-bar { position: absolute; background-repeat: no-repeat; background-color: #fff; filter: invert(.92) hue-rotate(180deg); }
+.pdf-rest { position: absolute; display: flex; align-items: center; justify-content: center; color: #64748b; font-size: 12px; border-left: 1px solid #334155; background: repeating-linear-gradient(to bottom, transparent 0 18%, rgba(100,116,139,.35) 18% calc(18% + 1px)); }

@@ -205,7 +205,7 @@ async function openSong(id) {
       $('#tabHost').classList.toggle('horizontal', tab === gpView && songLayout() === 'horizontal');
       try {
         const info = tab === pdfView
-          ? await withTimeout(pdfView.load(JSON.parse(await blob.text()), p.trackIndex ?? null, (path) => lib.getFile(song.id, path)), 30000)
+          ? await withTimeout(pdfView.load(JSON.parse(await blob.text()), p.trackIndexes?.length ? p.trackIndexes : p.trackIndex ?? null, (path) => lib.getFile(song.id, path)), 30000)
           : await withTimeout(gpView.load(await blob.arrayBuffer(), p.trackIndexes?.length ? p.trackIndexes : p.trackIndex ?? null), 30000);
         barDefs = info.barDefs;
         const alignKey = `${song.tab}:${barDefs.length}`;
@@ -270,8 +270,8 @@ function renderTrackSelect() {
   const shown = song ? shownParts() : [];
   const add = (value, text) => { const o = document.createElement('option'); o.value = value; o.textContent = text; sel.appendChild(o); return o; };
   if (shown.length > 1) add('multi', `${shown.length} parts`);
-  for (const t of tracks) if (t.strings > 0 || tab !== gpView) add(t.index, t.name);
-  if (tab === gpView && tracks.filter(t => t.strings > 0).length > 1) add('pick', 'Several parts…');
+  for (const t of tracks) if (t.strings > 0) add(t.index, t.name);
+  if (tracks.filter(t => t.strings > 0).length > 1) add('pick', 'Several parts…');
   sel.value = shown.length > 1 ? 'multi' : String(prefs().trackIndex ?? 0);
 }
 $('#trackSelect').addEventListener('change', (e) => {
@@ -284,10 +284,7 @@ $('#trackSelect').addEventListener('change', (e) => {
     return;
   }
   const i = +v;
-  if (tab === gpView) return setParts([i]);
-  prefs().trackIndex = i;
-  saveSongSoon();
-  tab.setTrack(i);
+  setParts([i]);
 });
 for (const v of [gpView, pdfView]) v.addEventListener('rendered', () => { lastUi.mi = -1; showLoopOnTab(); });
 const onBarClick = (e) => {
@@ -730,6 +727,62 @@ document.querySelectorAll('[data-zoom]').forEach(b => b.addEventListener('click'
   renderSettings();
 }));
 
+// ---------------- settings export / import ----------------
+// A plain JSON file the person saves anywhere (Google Drive through the iOS
+// Files sheet, a download on a computer) and opens on another device.
+
+const PREF_KEYS = ['prefs', 'sync', 'customSections'];
+
+$('#btnExportPrefs').addEventListener('click', async () => {
+  const all = await lib.listSongs();
+  const out = { app: 'guitar-practice-player', kind: 'settings', version: 1, exportedAt: new Date().toISOString(), songs: {} };
+  for (const sg of all) {
+    const rec = { title: sg.title };
+    for (const k of PREF_KEYS) if (sg[k] !== undefined) rec[k] = sg[k];
+    out.songs[sg.id] = rec;
+  }
+  const name = 'guitar-practice-settings.json';
+  const file = new File([JSON.stringify(out, null, 1)], name, { type: 'application/json' });
+  try {
+    if (navigator.canShare?.({ files: [file] })) {
+      await navigator.share({ files: [file], title: 'Guitar practice settings' });
+      return toast('Settings exported.');
+    }
+  } catch (e) {
+    if (e?.name === 'AbortError') return;
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(file);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  toast(`Settings saved as ${name}.`);
+});
+
+$('#btnImportPrefs').addEventListener('click', () => $('#fileImportPrefs').click());
+$('#fileImportPrefs').addEventListener('change', async (e) => {
+  const f = e.target.files?.[0];
+  e.target.value = '';
+  if (!f) return;
+  let data;
+  try { data = JSON.parse(await f.text()); } catch { return toast("That file isn't a settings export."); }
+  if (data?.kind !== 'settings' || typeof data.songs !== 'object') return toast("That file isn't a settings export.");
+  let applied = 0, skipped = [];
+  for (const [id, rec] of Object.entries(data.songs)) {
+    const sg = await lib.getSong(id);
+    if (!sg) { skipped.push(rec.title || id); continue; }
+    for (const k of PREF_KEYS) {
+      if (rec[k] === undefined) delete sg[k];
+      else sg[k] = rec[k];
+    }
+    await lib.putSong(sg);
+    applied++;
+  }
+  toast(`Imported settings for ${applied} song${applied === 1 ? '' : 's'}.` + (skipped.length ? ` Not on this device: ${skipped.join(', ')}.` : ''), 6000);
+  if (song && data.songs[song.id]) { closeSheets(); clearTimeout(saveTimer); openSong(song.id); }
+});
+
 // ---------------- parts (stacked tabs) ----------------
 
 function shownParts() {
@@ -750,7 +803,7 @@ function setParts(list) {
 
 function renderPartsEditor() {
   const host = $('#partsEdit');
-  const usable = tab === gpView ? tracks.filter(t => t.strings > 0) : [];
+  const usable = tracks.filter(t => t.strings > 0);
   $('#partsBlock').hidden = usable.length < 2;
   host.innerHTML = '';
   if (usable.length < 2) return;
