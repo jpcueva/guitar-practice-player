@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b1120" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Practice" />
+  <title>Guitar Practice Player</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+  <link rel="stylesheet" href="css/app.css" />
+</head>
+<body>
+  <header class="topbar">
+    <button id="btnLibrary" class="icon-btn" aria-label="Songs" title="Songs">
+      <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+    </button>
+    <div class="song-head">
+      <div id="songTitle" class="song-title">No song loaded</div>
+      <div id="songSub" class="song-sub">Tap ☰ to add a song</div>
+    </div>
+    <select id="trackSelect" class="track-select" aria-label="Tab track" hidden></select>
+    <button id="btnSettings" class="icon-btn" aria-label="Settings" title="Sync and display">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+    </button>
+  </header>
+
+  <main id="tabScroll" class="tab-scroll">
+    <div id="tabHost" class="tab-host"></div>
+    <div id="noTab" class="no-tab" hidden>
+      <div class="big-bar"><span id="bigBar">–</span><small id="bigBeat"></small></div>
+      <div id="bigSection" class="big-section"></div>
+      <div class="beat-dots" id="beatDots"></div>
+      <p class="hint" id="noTabHint">No tab for this song yet. Add a Guitar Pro or MusicXML file in Songs → <b>Add tab</b>.</p>
+    </div>
+    <div id="welcome" class="welcome">
+      <h1>Guitar Practice Player</h1>
+      <p>Play your Moises stems with mute, solo and volume, slow them down without changing pitch, loop any section, and follow the tab as it plays.</p>
+      <button class="primary" id="btnWelcomeAdd">Add a song</button>
+      <p class="hint">Pick a song package (.zip) or a Moises export from the Files app. Songs are saved on this device and work offline.</p>
+    </div>
+  </main>
+
+  <section class="sections-wrap">
+    <div id="sectionMap" class="section-map" aria-label="Song sections"></div>
+  </section>
+
+  <footer class="transport">
+    <div class="timeline-row">
+      <span id="timeNow" class="time">0:00</span>
+      <div id="progress" class="progress" role="slider" aria-label="Song position" tabindex="0">
+        <div id="progressSections" class="progress-sections"></div>
+        <div id="progressLoop" class="progress-loop" hidden></div>
+        <div id="progressFill" class="progress-fill"></div>
+        <div id="progressHead" class="progress-head"></div>
+      </div>
+      <span id="timeTotal" class="time">0:00</span>
+    </div>
+
+    <div class="pos-row">
+      <span id="posBar" class="pos-bar">Bar –</span>
+      <span id="posSection" class="pos-section"></span>
+      <span id="countIn" class="count-in" hidden></span>
+    </div>
+
+    <div class="controls-row">
+      <button id="btnLoopStart" class="ctl" title="Back to start of loop / section" aria-label="Back to start">
+        <svg viewBox="0 0 24 24"><path d="M6 5v14M18 6l-9 6 9 6z"/></svg>
+      </button>
+      <button id="btnPrevBar" class="ctl" title="Previous bar" aria-label="Previous bar">
+        <svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg>
+      </button>
+      <button id="btnPlay" class="ctl play" aria-label="Play">
+        <svg id="icoPlay" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" class="fill"/></svg>
+        <svg id="icoPause" viewBox="0 0 24 24" hidden><path d="M7 5h3v14H7zM14 5h3v14h-3z" class="fill"/></svg>
+      </button>
+      <button id="btnNextBar" class="ctl" title="Next bar" aria-label="Next bar">
+        <svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>
+      </button>
+      <button id="btnLoop" class="ctl toggle" title="Loop" aria-label="Loop" aria-pressed="false">
+        <svg viewBox="0 0 24 24"><path d="M17 2l3 3-3 3"/><path d="M4 11V9a4 4 0 0 1 4-4h12"/><path d="M7 22l-3-3 3-3"/><path d="M20 13v2a4 4 0 0 1-4 4H4"/></svg>
+      </button>
+    </div>
+
+    <div class="ab-row">
+      <button id="btnA" class="chip-btn" title="Loop starts at the current bar">A</button>
+      <button id="btnB" class="chip-btn" title="Loop ends after the current bar">B</button>
+      <span id="loopLabel" class="loop-label">Loop: whole song</span>
+      <button id="btnClick" class="chip-btn toggle" aria-pressed="false" title="Metronome click">Click</button>
+      <button id="btnCountIn" class="chip-btn toggle" aria-pressed="false" title="One bar count-in before playing">Count-in</button>
+    </div>
+
+    <div class="tempo-row">
+      <button id="btnSlower" class="chip-btn" aria-label="Slower">−</button>
+      <input id="tempo" type="range" min="50" max="125" step="5" value="100" aria-label="Tempo" />
+      <button id="btnFaster" class="chip-btn" aria-label="Faster">+</button>
+      <span id="tempoLabel" class="tempo-label">100%</span>
+      <button id="btnMixer" class="chip-btn mixer-btn" title="Mixer">
+        <svg viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>
+        Mixer
+      </button>
+    </div>
+  </footer>
+
+  <!-- Mixer -->
+  <div id="mixer" class="sheet" hidden>
+    <div class="sheet-head"><h2>Mixer</h2><button class="icon-btn close" data-close>✕</button></div>
+    <div id="stemList" class="stem-list"></div>
+    <div class="stem click-stem">
+      <span class="stem-dot" style="background:#94a3b8"></span>
+      <span class="stem-name">Click</span>
+      <input id="clickVol" type="range" min="0" max="1" step="0.01" value="0.7" aria-label="Click volume" />
+    </div>
+    <button id="btnResetMix" class="link-btn">Reset mix</button>
+  </div>
+
+  <!-- Library -->
+  <div id="library" class="sheet left" hidden>
+    <div class="sheet-head"><h2>Songs</h2><button class="icon-btn close" data-close>✕</button></div>
+    <label class="primary file-btn">
+      Add song
+      <input id="fileAdd" type="file" multiple accept=".zip,.json,.wav,.mp3,.m4a,.aac,.mp4,.ogg,.opus,.flac,.caf,.aif,.aiff,.gp,.gp3,.gp4,.gp5,.gpx,.xml,.musicxml,.mxl,application/zip,audio/*" />
+    </label>
+    <p class="hint">A song package (.zip) or a Moises export: the .zip, or all the WAV files at once. You can include a Guitar Pro / MusicXML tab.</p>
+    <ul id="songList" class="song-list"></ul>
+    <div id="storage" class="hint storage"></div>
+  </div>
+
+  <!-- Settings -->
+  <div id="settings" class="sheet" hidden>
+    <div class="sheet-head"><h2>Sync &amp; display</h2><button class="icon-btn close" data-close>✕</button></div>
+    <h3>Line the tab up with the recording</h3>
+    <p class="hint">The app lines the tab up with the recording using the tab's tempo changes and the metronome track. If the cursor is still a beat or a bar off, move where bar 1 starts. Turn the click on to check.</p>
+    <div class="row-ctl" id="autoRow">
+      <button class="chip-btn" id="btnAutoAlign">Line up automatically</button>
+      <span class="hint" id="alignScore"></span>
+    </div>
+    <div class="row-ctl">
+      <span>Bar 1 starts on beat</span>
+      <button class="chip-btn" data-offset="-4">−1 bar</button>
+      <button class="chip-btn" data-offset="-1">−1</button>
+      <b id="offsetVal">0</b>
+      <button class="chip-btn" data-offset="1">+1</button>
+      <button class="chip-btn" data-offset="4">+1 bar</button>
+    </div>
+    <div class="row-ctl">
+      <span>Fine tune</span>
+      <button class="chip-btn" data-nudge="-20">−20 ms</button>
+      <b id="nudgeVal">0 ms</b>
+      <button class="chip-btn" data-nudge="20">+20 ms</button>
+    </div>
+    <div class="row-ctl" id="bpbRow">
+      <span>Beats per bar (no tab)</span>
+      <button class="chip-btn" data-bpb="-1">−</button>
+      <b id="bpbVal">4</b>
+      <button class="chip-btn" data-bpb="1">+</button>
+    </div>
+    <h3>Tab display</h3>
+    <div class="row-ctl">
+      <span>Layout</span>
+      <button class="chip-btn toggle" data-layout="page">Page</button>
+      <button class="chip-btn toggle" data-layout="horizontal">One line</button>
+    </div>
+    <div class="row-ctl">
+      <span>Size</span>
+      <button class="chip-btn" data-zoom="-0.1">A−</button>
+      <b id="zoomVal">100%</b>
+      <button class="chip-btn" data-zoom="0.1">A+</button>
+    </div>
+    <h3>Audio</h3>
+    <label class="check"><input type="checkbox" id="optStereo" /> Keep stereo (uses twice the memory; turn off if the app reloads on its own)</label>
+    <p class="hint small">alphaTab renders the tab. Signalsmith Stretch keeps the pitch when you change tempo.</p>
+  </div>
+
+  <div id="backdrop" class="backdrop" hidden></div>
+  <div id="toast" class="toast" hidden></div>
+  <div id="busy" class="busy" hidden><div class="spinner"></div><div id="busyMsg">Loading…</div></div>
+
+  <script src="vendor/jszip.min.js"></script>
+  <script src="vendor/alphatab/alphaTab.min.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

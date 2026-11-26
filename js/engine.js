@@ -1,0 +1,411 @@
+// Audio engine: plays every stem in lock-step from one AudioContext clock.
+//
+// Tempo change keeps pitch: all stems play with the same playbackRate (which
+// changes speed *and* pitch together, so they never drift apart), then the
+// mixed signal goes through a Signalsmith Stretch pitch shifter that shifts the
+// pitch back by the same amount. At 100% speed the shifter is bypassed.
+
+import SignalsmithStretch from '../vendor/signalsmith-stretch.mjs';
+
+const SILENT_WAV =
+  'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=';
+
+export class Engine extends EventTarget {
+  constructor() {
+    super();
+    this.ctx = null;
+    this.stems = [];          // {id, name, buffer, gain, volume, muted, solo}
+    this.rate = 1;
+    this.playing = false;
+    this.anchorCtx = 0;       // ctx time at which anchorPos is heard
+    this.anchorPos = 0;       // song position (s) at anchorCtx
+    this.duration = 0;
+    this.loop = { enabled: false, a: 0, b: 0 };
+    this.sources = [];
+    this.clickEnabled = false;
+    this.clickVolume = 0.7;
+    this.beats = [];          // beat times (s) in the audio
+    this.downbeats = new Set(); // indexes into beats that start a bar
+    this.stretch = null;
+    this.wetLatency = 0;
+    this._clickRaw = 0;
+    this._timer = null;
+  }
+
+  async init({ sampleRate } = {}) {
+    if (this.ctx) return;
+    try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch {}
+    const AC = window.AudioContext || window.webkitAudioContext;
+    const opts = { latencyHint: 'playback' };
+    if (sampleRate) opts.sampleRate = sampleRate;
+    try { this.ctx = new AC(opts); } catch { this.ctx = new AC(); }
+    const c = this.ctx;
+    this.bus = c.createGain();
+    this.dry = c.createGain();
+    this.wet = c.createGain();
+    this.master = c.createGain();
+    this.wet.gain.value = 0;
+    this.bus.connect(this.dry);
+    this.dry.connect(this.master);
+    this.wet.connect(this.master);
+    this.master.connect(c.destination);
+
+    this.clickBus = c.createGain();
+    this.clickBus.gain.value = this.clickVolume;
+    this.clickDelay = c.createDelay(2);
+    this.clickBus.connect(this.clickDelay);
+    this.clickDelay.connect(this.master);
+
+    try {
+      this.stretch = await SignalsmithStretch(c, {
+        numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2],
+      });
+      this.bus.connect(this.stretch);
+      this.stretch.connect(this.wet);
+      this.wetLatency = await this.stretch.latency();
+      await this.stretch.schedule({ active: false });
+    } catch (e) {
+      console.warn('Pitch-preserving stretch unavailable; tempo will change pitch.', e);
+      this.stretch = null;
+    }
+  }
+
+  /** Must run inside a user gesture on iOS. */
+  async unlock() {
+    if (!this.ctx) await this.init();
+    if (this.ctx.state !== 'running') {
+      try { await this.ctx.resume(); } catch {}
+    }
+    // Older iOS: playing an <audio> element switches the session to "playback",
+    // so the silent switch does not mute Web Audio.
+    if (!this._unlockedEl) {
+      try {
+        const el = new Audio(SILENT_WAV);
+        el.setAttribute('playsinline', '');
+        el.loop = true;
+        el.volume = 0.0001;
+        await el.play();
+        this._unlockedEl = el;
+      } catch {}
+    }
+  }
+
+  async decode(blob) {
+    const ab = await blob.arrayBuffer();
+    return await new Promise((res, rej) => {
+      const p = this.ctx.decodeAudioData(ab, res, rej);
+      if (p && p.then) p.then(res, rej);
+    });
+  }
+
+  /**
+   * stems: [{id, name, blob, volume?, muted?, solo?}]
+   * mono: downmix each stem to one channel to halve memory (phones).
+   */
+  async loadStems(stems, { mono = false, onProgress } = {}) {
+    this.stop();
+    for (const s of this.stems) s.gain.disconnect();
+    this.stems = [];
+    this.duration = 0;
+    let i = 0;
+    for (const s of stems) {
+      onProgress?.(i, stems.length, s.name);
+      let buffer = await this.decode(s.blob);
+      if (mono && buffer.numberOfChannels > 1) buffer = this._downmix(buffer);
+      const gain = this.ctx.createGain();
+      gain.connect(this.bus);
+      this.stems.push({
+        id: s.id, name: s.name, buffer, gain,
+        volume: s.volume ?? 1, muted: !!s.muted, solo: !!s.solo,
+      });
+      this.duration = Math.max(this.duration, buffer.duration);
+      i++;
+    }
+    onProgress?.(stems.length, stems.length, '');
+    this._applyGains();
+    this.anchorPos = 0;
+    this.dispatchEvent(new Event('change'));
+  }
+
+  _downmix(buf) {
+    const out = this.ctx.createBuffer(1, buf.length, buf.sampleRate);
+    const o = out.getChannelData(0);
+    const n = buf.numberOfChannels;
+    for (let c = 0; c < n; c++) {
+      const d = buf.getChannelData(c);
+      for (let k = 0; k < d.length; k++) o[k] += d[k] / n;
+    }
+    return out;
+  }
+
+  setStem(id, patch) {
+    const s = this.stems.find(x => x.id === id);
+    if (!s) return;
+    Object.assign(s, patch);
+    this._applyGains();
+  }
+
+  _applyGains() {
+    const anySolo = this.stems.some(s => s.solo);
+    const t = this.ctx ? this.ctx.currentTime : 0;
+    for (const s of this.stems) {
+      const on = !s.muted && (!anySolo || s.solo);
+      const v = on ? s.volume : 0;
+      s.gain.gain.setTargetAtTime(v, t, 0.015);
+    }
+  }
+
+  // ---------- transport ----------
+
+  get outLatency() {
+    if (!this.ctx) return 0;
+    const base = this.ctx.outputLatency || this.ctx.baseLatency || 0;
+    return base + (this._wetOn() ? this.wetLatency : 0);
+  }
+
+  _wetOn() { return !!this.stretch && Math.abs(this.rate - 1) > 1e-4; }
+
+  _wrap(p) {
+    const { enabled, a, b } = this.loop;
+    if (enabled && b > a && p >= b) p = a + ((p - a) % (b - a));
+    return p;
+  }
+
+  /** Song position (s) that is being heard right now. */
+  get position() {
+    if (!this.playing) return this.anchorPos;
+    const t = this.ctx.currentTime - this.outLatency;
+    const raw = this.anchorPos + Math.max(0, t - this.anchorCtx) * this.rate;
+    const p = this._wrap(raw);
+    return Math.min(p, this.duration);
+  }
+
+  /** Seconds left of the count-in, or 0. */
+  get countInRemaining() {
+    if (!this.playing) return 0;
+    return Math.max(0, this.anchorCtx - (this.ctx.currentTime - this.outLatency));
+  }
+
+  async play({ countInBeats = 0 } = {}) {
+    if (!this.stems.length) return;
+    await this.unlock();
+    if (this.playing) return;
+    let pos = this.anchorPos;
+    if (this.loop.enabled && (pos < this.loop.a || pos >= this.loop.b)) pos = this.loop.a;
+    if (pos >= this.duration - 0.05) pos = this.loop.enabled ? this.loop.a : 0;
+    const now = this.ctx.currentTime + 0.06;
+    let countIn = 0;
+    if (countInBeats > 0) {
+      const beatLen = this._beatLengthAt(pos) / this.rate;
+      countIn = beatLen * countInBeats;
+      for (let k = 0; k < countInBeats; k++) this._click(now + k * beatLen + this._clickDelay(), k === 0);
+    }
+    this._start(pos, now + countIn);
+  }
+
+  _start(pos, when) {
+    this._killSources();
+    const c = this.ctx;
+    this._setWet();
+    for (const s of this.stems) {
+      const src = c.createBufferSource();
+      src.buffer = s.buffer;
+      src.playbackRate.value = this.rate;
+      if (this.loop.enabled && this.loop.b > this.loop.a) {
+        src.loop = true;
+        src.loopStart = this.loop.a;
+        src.loopEnd = this.loop.b;
+      }
+      src.connect(s.gain);
+      src.start(when, Math.min(pos, s.buffer.duration));
+      this.sources.push(src);
+    }
+    this.sources[0].onended = () => {
+      if (this.playing && !this.loop.enabled && this.sources.length && this.position >= this.duration - 0.1) {
+        this.playing = false;
+        this.anchorPos = 0;
+        this._killSources();
+        this.dispatchEvent(new Event('state'));
+      }
+    };
+    this.anchorPos = pos;
+    this.anchorCtx = when;
+    this._clickRaw = pos;
+    this.playing = true;
+    clearInterval(this._timer);
+    this._timer = setInterval(() => this._scheduleClicks(), 25);
+    this._updateMediaSession();
+    this.dispatchEvent(new Event('state'));
+  }
+
+  _killSources() {
+    for (const s of this.sources) {
+      s.onended = null;
+      try { s.stop(); } catch {}
+      s.disconnect();
+    }
+    this.sources = [];
+  }
+
+  pause() {
+    if (!this.playing) return;
+    this.anchorPos = this.position;
+    this.playing = false;
+    clearInterval(this._timer);
+    this._killSources();
+    this.dispatchEvent(new Event('state'));
+  }
+
+  stop() {
+    this.pause();
+    this.anchorPos = 0;
+  }
+
+  toggle(opts) { return this.playing ? this.pause() : this.play(opts); }
+
+  seek(pos) {
+    pos = Math.max(0, Math.min(pos, Math.max(0, this.duration - 0.01)));
+    if (this.playing) {
+      this._start(pos, this.ctx.currentTime + 0.03);
+    } else {
+      this.anchorPos = pos;
+      this.dispatchEvent(new Event('seek'));
+    }
+  }
+
+  setLoop(enabled, a = this.loop.a, b = this.loop.b) {
+    if (b < a) [a, b] = [b, a];
+    this.loop = { enabled: enabled && b - a > 0.05, a, b };
+    if (this.playing) {
+      let pos = this.position;
+      if (this.loop.enabled && (pos < a || pos >= b)) pos = a;
+      this._start(pos, this.ctx.currentTime + 0.03);
+    } else if (this.loop.enabled && (this.anchorPos < a || this.anchorPos >= b)) {
+      this.anchorPos = a;
+    }
+    this.dispatchEvent(new Event('loop'));
+  }
+
+  setRate(rate) {
+    rate = Math.max(0.25, Math.min(2, rate));
+    if (Math.abs(rate - this.rate) < 1e-6) return;
+    if (this.playing) {
+      const now = this.ctx.currentTime;
+      const pos = this.position;
+      this.rate = rate;
+      // Restart cleanly so the pitch shifter and click track re-anchor together.
+      this._start(pos, now + 0.03);
+    } else {
+      this.rate = rate;
+      this._setWet();
+    }
+    this.dispatchEvent(new Event('rate'));
+  }
+
+  _setWet() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const wetOn = this._wetOn();
+    if (this.stretch) {
+      this.stretch.schedule({ active: wetOn, semitones: wetOn ? -12 * Math.log2(this.rate) : 0 });
+    }
+    this.dry.gain.setTargetAtTime(wetOn ? 0 : 1, t, 0.01);
+    this.wet.gain.setTargetAtTime(wetOn ? 1 : 0, t, 0.01);
+    this.clickDelay.delayTime.setValueAtTime(wetOn ? this.wetLatency : 0, t);
+  }
+
+  // ---------- click track ----------
+
+  setBeatGrid(beats, downbeatIdx) {
+    this.beats = beats || [];
+    this.downbeats = new Set(downbeatIdx || []);
+  }
+
+  setClick(enabled) {
+    this.clickEnabled = enabled;
+    if (this.playing) this._clickRaw = this.anchorPos + Math.max(0, this.ctx.currentTime - this.anchorCtx) * this.rate;
+  }
+
+  setClickVolume(v) {
+    this.clickVolume = v;
+    if (this.clickBus) this.clickBus.gain.value = v;
+  }
+
+  _clickDelay() { return 0; } // delay node handles wet latency
+
+  _beatLengthAt(pos) {
+    const b = this.beats;
+    if (b.length < 2) return 60 / 100;
+    let i = lowerBound(b, pos);
+    i = Math.max(1, Math.min(b.length - 1, i));
+    return b[i] - b[i - 1];
+  }
+
+  _scheduleClicks() {
+    if (!this.playing || !this.clickEnabled || !this.beats.length) return;
+    const now = this.ctx.currentTime;
+    const until = now + 0.2;
+    const rawUntil = this.anchorPos + (until - this.anchorCtx) * this.rate;
+    const { enabled, a, b } = this.loop;
+    const L = b - a;
+    let guard = 0;
+    while (this._clickRaw < rawUntil && guard++ < 64) {
+      let p = this._clickRaw, off = 0;
+      if (enabled && L > 0 && p >= b) {
+        const k = Math.floor((p - a) / L);
+        off = k * L; p -= off;
+      }
+      const segEnd = enabled && L > 0 && p < b ? b : Infinity;
+      const i = lowerBound(this.beats, p - 1e-6);
+      const bt = this.beats[i];
+      if (bt === undefined || bt >= segEnd) {
+        if (segEnd === Infinity) { this._clickRaw = Infinity; break; }
+        this._clickRaw = segEnd + off;
+        continue;
+      }
+      const r = bt + off;
+      if (r >= rawUntil) break;
+      const when = this.anchorCtx + (r - this.anchorPos) / this.rate;
+      if (when >= now - 0.005) this._click(when, this.downbeats.has(i));
+      this._clickRaw = r + 1e-4;
+    }
+  }
+
+  _click(when, accent) {
+    const c = this.ctx;
+    const o = c.createOscillator();
+    const g = c.createGain();
+    o.type = 'square';
+    o.frequency.value = accent ? 1760 : 1175;
+    g.gain.setValueAtTime(0, when);
+    g.gain.linearRampToValueAtTime(accent ? 0.5 : 0.32, when + 0.002);
+    g.gain.exponentialRampToValueAtTime(0.0001, when + 0.05);
+    o.connect(g); g.connect(this.clickBus);
+    o.start(when); o.stop(when + 0.06);
+  }
+
+  // ---------- lock screen ----------
+
+  setMediaInfo(title, artist) {
+    this._media = { title, artist };
+    this._updateMediaSession();
+  }
+
+  _updateMediaSession() {
+    if (!('mediaSession' in navigator) || !this._media) return;
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({ title: this._media.title, artist: this._media.artist || '' });
+      navigator.mediaSession.setActionHandler('play', () => this.play());
+      navigator.mediaSession.setActionHandler('pause', () => this.pause());
+    } catch {}
+  }
+}
+
+export function lowerBound(arr, x) {
+  let lo = 0, hi = arr.length;
+  while (lo < hi) {
+    const m = (lo + hi) >> 1;
+    if (arr[m] < x) lo = m + 1; else hi = m;
+  }
+  return lo;
+}
