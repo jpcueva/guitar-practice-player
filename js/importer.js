@@ -114,7 +114,11 @@ export async function importFiles(files, { decode, onStatus }) {
   }
 
   const existing = await lib.getSong(meta.id);
-  if (existing) await lib.deleteSong(meta.id);
+  // Re-adding a song (say, a better-quality package) without a tab keeps the tab
+  // you attached earlier, with its sync and section edits.
+  const keepTab = existing?.tab && !meta.tab;
+  if (keepTab) await lib.deleteFiles(meta.id, (path) => path.startsWith('stems/'));
+  else if (existing) await lib.deleteSong(meta.id);
 
   const blobs = [];
   let bytes = 0;
@@ -127,6 +131,11 @@ export async function importFiles(files, { decode, onStatus }) {
   await lib.requestPersist();
   await lib.putFiles(meta.id, blobs, (i, n) => onStatus?.(`Saving for offline use (${i + 1}/${n})…`));
   const record = { ...meta, addedAt: Date.now(), bytes, prefs: existing?.prefs || {} };
+  if (keepTab) {
+    record.tab = existing.tab;
+    record.sync = existing.sync || record.sync;
+    if (existing.customSections) record.customSections = existing.customSections;
+  }
   await lib.putSong(record);
   return record;
 }

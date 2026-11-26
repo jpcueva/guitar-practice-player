@@ -140,7 +140,12 @@ export class Engine extends EventTarget {
     let i = 0;
     for (const s of stems) {
       onProgress?.(i, stems.length, s.name);
-      let buffer = await this.decode(s.blob);
+      let buffer;
+      try {
+        buffer = await this.decode(s.blob);
+      } catch (e) {
+        throw new Error(`this browser couldn't decode the ${s.name} audio. If the song package uses FLAC, rebuild it with "--codec aac".`);
+      }
       if (mono && buffer.numberOfChannels > 1) buffer = this._downmix(buffer);
       const gain = this.ctx.createGain();
       gain.connect(this.bus);
