@@ -10,7 +10,9 @@ export class TabView extends EventTarget {
     this.scroller = scroller;
     this.api = null;
     this.score = null;
-    this.trackIndex = 0;
+    this.trackIndex = 0;      // the part the cursor follows (the top one)
+    this.trackIndexes = [0];  // parts shown, top to bottom
+    this.labels = [];
     this.layout = 'page';
     this.scale = 1;
     this.rendered = false;
@@ -42,8 +44,12 @@ export class TabView extends EventTarget {
     };
   }
 
-  /** Load a tab file. Resolves with {tracks, barDefs} once the score is parsed. */
+  /**
+   * Load a tab file. Resolves with {tracks, barDefs} once the score is parsed.
+   * trackIndex: one part, or an array of parts to stack (top to bottom), or null for a default.
+   */
   load(data, trackIndex = null) {
+    let wanted = Array.isArray(trackIndex) ? trackIndex.slice() : trackIndex == null ? null : [trackIndex];
     this.destroy();
     this.rendered = false;
     this.host.innerHTML = '';
@@ -60,10 +66,12 @@ export class TabView extends EventTarget {
         this.score = score;
         const tracks = score.tracks.map((t, i) => ({
           index: i, name: t.name || `Track ${i + 1}`,
-          strings: t.staves[0]?.tuning?.length || 0,
+          strings: t.staves[0]?.isPercussion ? 0 : t.staves[0]?.tuning?.length || 0, // 0 = drums, not shown as tab
           isGuitar: (t.staves[0]?.tuning?.length || 0) >= 6 && !t.staves[0]?.isPercussion && (t.staves[0]?.tuning?.[0] || 0) > 0,
         }));
-        if (trackIndex === null || !score.tracks[trackIndex]) {
+        wanted = (wanted || []).filter(i => score.tracks[i] && tracks[i].strings > 0);
+        if (wanted.length) trackIndex = wanted[0];
+        else {
           // default to the guitar part with the most notes (the main riff, not an intro-only part)
           const notes = (t) => { let n = 0; for (const b of t.staves[0]?.bars || []) for (const bt of b.voices[0]?.beats || []) if (!bt.isRest) n++; return n; };
           const guitars = tracks.filter(t => t.isGuitar);
@@ -71,26 +79,72 @@ export class TabView extends EventTarget {
           trackIndex = g ? g.index : 0;
         }
         this.trackIndex = trackIndex;
-        resolve({ tracks, trackIndex, barDefs: this.barDefs(), title: score.title, artist: score.artist });
+        this.trackIndexes = wanted.length ? wanted : [trackIndex];
+        if (this.trackIndexes.length > 1) {
+          // api.load() renders the first part; switch to the stack once it is parsed.
+          queueMicrotask(() => this.api?.renderTracks(this.trackIndexes.map(i => score.tracks[i])));
+        }
+        resolve({ tracks, trackIndex, trackIndexes: this.trackIndexes.slice(), barDefs: this.barDefs(), title: score.title, artist: score.artist });
       });
       this.api.renderFinished.on(() => {
         this.rendered = true;
         this._attachOverlay();
+        this._renderLabels();
         this._lastBar = -1;
         this.dispatchEvent(new Event('rendered'));
       });
       try {
         const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
-        this.api.load(bytes, [trackIndex ?? 0]);
+        this.api.load(bytes, [wanted?.[0] ?? 0]);
       } catch (e) { reject(e); }
     });
   }
 
   setTrack(i) {
-    if (!this.api || !this.score?.tracks[i]) return;
-    this.trackIndex = i;
+    this.setTracks([i]);
+  }
+
+  /** Show several parts stacked, top to bottom, in this order. */
+  setTracks(list) {
+    list = (list || []).filter(i => this.score?.tracks[i]);
+    if (!this.api || !list.length) return;
+    this.trackIndexes = list;
+    this.trackIndex = list[0];
     this.rendered = false;
-    this.api.renderTracks([this.score.tracks[i]]);
+    this.api.renderTracks(list.map(i => this.score.tracks[i]));
+  }
+
+  /** Part names pinned to the left edge, so you can tell the stacked lines apart. */
+  _renderLabels() {
+    for (const l of this.labels) l.remove();
+    this.labels = [];
+    if (this.trackIndexes.length < 2) return;
+    const lk = this._lookup();
+    const sys = lk?.staffSystems?.[0];
+    const staffBars = sys?.bars?.[0]?.bars || [];
+    const o = this._off();
+    // one BarBounds per staff, in the order the parts are drawn
+    staffBars.forEach((bb, k) => {
+      const t = this.score.tracks[this.trackIndexes[k]];
+      if (!t) return;
+      const el = document.createElement('div');
+      el.className = 'tab-part-label';
+      el.textContent = t.name || `Part ${k + 1}`;
+      el.style.top = `${o.y + bb.visualBounds.y - 2}px`;
+      this.host.appendChild(el);
+      this.labels.push(el);
+    });
+    this._placeLabels();
+    if (!this._labelScroll) {
+      this._labelScroll = () => this._placeLabels();
+      this.scroller.addEventListener('scroll', this._labelScroll, { passive: true });
+    }
+  }
+
+  _placeLabels() {
+    if (!this.labels.length) return;
+    const left = Math.max(0, this.scroller.scrollLeft - this.host.offsetLeft) + 6;
+    for (const el of this.labels) el.style.left = `${left}px`;
   }
 
   setLayout(layout, scale) {
@@ -107,6 +161,8 @@ export class TabView extends EventTarget {
   }
 
   destroy() {
+    for (const l of this.labels) l.remove();
+    this.labels = [];
     if (this.api) { try { this.api.destroy(); } catch {} }
     this.api = null;
     this.score = null;
@@ -191,7 +247,9 @@ export class TabView extends EventTarget {
     const offLeft = o.x + this.host.offsetLeft;
     if (this.layout === 'horizontal') {
       const target = offLeft + x - sc.clientWidth * 0.3;
-      if (Math.abs(sc.scrollLeft - target) > sc.clientWidth * 0.25) sc.scrollTo({ left: target, behavior: 'smooth' });
+      // Jump when far behind (after a seek); otherwise glide. A smooth scrollTo
+      // restarted on every frame never catches up with the cursor.
+      if (Math.abs(sc.scrollLeft - target) > sc.clientWidth * 0.6) sc.scrollLeft = target;
       else sc.scrollLeft += (target - sc.scrollLeft) * 0.15;
     } else {
       const key = Math.round(v.y);

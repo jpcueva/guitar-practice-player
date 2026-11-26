@@ -169,3 +169,11 @@ input[type=range]::-moz-range-thumb { width: 20px; height: 20px; border-radius: 
 .sec-row .sec-bar { min-width: 58px; color: var(--muted, #94a3b8); font-size: 13px; font-variant-numeric: tabular-nums; }
 .sec-row input { flex: 1; min-width: 0; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); color: inherit; border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 16px; }
 .sec-row .icon-btn { flex: none; }
+
+.parts-edit { display: flex; flex-direction: column; gap: 4px; margin: 8px 0 12px; }
+.part-row { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 8px; background: rgba(255,255,255,.03); }
+.part-row.on { background: rgba(245,158,11,.10); }
+.part-row label { flex: 1; display: flex; align-items: center; gap: 10px; min-height: 36px; }
+.part-row input { width: 20px; height: 20px; accent-color: #f59e0b; }
+.part-row .icon-btn:disabled { opacity: .25; }
+.tab-part-label { position: absolute; z-index: 3; font-size: 11px; line-height: 1; padding: 3px 6px; border-radius: 6px; background: rgba(15,23,42,.85); color: #f59e0b; pointer-events: none; white-space: nowrap; }
