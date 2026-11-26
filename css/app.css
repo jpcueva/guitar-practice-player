@@ -159,3 +159,7 @@ input[type=range]::-moz-range-thumb { width: 20px; height: 20px; border-radius: 
   .ctl.play { width: 52px; height: 52px; }
   .transport { gap: 4px; }
 }
+
+/* PDF tabs: original pages, inverted to suit the dark theme */
+.pdf-pages { margin: 0 auto; max-width: 100%; }
+.pdf-page { display: block; width: 100%; height: auto; margin: 0 0 10px; border-radius: 6px; filter: invert(.92) hue-rotate(180deg); background: #fff; }

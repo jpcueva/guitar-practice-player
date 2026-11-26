@@ -1,8 +1,8 @@
 // Offline cache for the app itself (songs live in IndexedDB, not here).
-const VERSION = 'gpp-v2';
+const VERSION = 'gpp-v3';
 const ASSETS = [
   './', 'index.html', 'css/app.css', 'manifest.webmanifest',
-  'js/app.js', 'js/engine.js', 'js/timeline.js', 'js/tab.js', 'js/library.js', 'js/importer.js', 'js/beats.js',
+  'js/app.js', 'js/engine.js', 'js/timeline.js', 'js/tab.js', 'js/library.js', 'js/importer.js', 'js/beats.js', 'js/pdftab.js',
   'vendor/jszip.min.js', 'vendor/signalsmith-stretch.mjs', 'vendor/alphatab/alphaTab.min.js',
   'vendor/alphatab/font/Bravura.woff2', 'vendor/alphatab/font/Bravura.woff',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',

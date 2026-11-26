@@ -1,6 +1,7 @@
 import { Engine } from './engine.js';
 import { buildTimeline, autoOffset } from './timeline.js';
 import { TabView } from './tab.js';
+import { PdfTabView } from './pdftab.js';
 import * as lib from './library.js';
 import { importFiles, attachTab } from './importer.js';
 
@@ -11,7 +12,9 @@ const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform 
 
 const globalPrefs = loadGlobalPrefs();
 const engine = new Engine();
-const tab = new TabView($('#tabHost'), $('#tabScroll'));
+const gpView = new TabView($('#tabHost'), $('#tabScroll'));
+const pdfView = new PdfTabView($('#tabHost'), $('#tabScroll'));
+let tab = gpView;
 
 let song = null;        // stored record
 let barDefs = null;     // from tab
@@ -94,7 +97,7 @@ async function renderLibrary() {
     li.innerHTML = `
       <button class="song-open"><b></b><small></small></button>
       <div class="song-actions">
-        <label class="chip-btn">${s.tab ? 'Replace tab' : 'Add tab'}<input type="file" accept=".gp,.gp3,.gp4,.gp5,.gpx,.xml,.musicxml,.mxl" /></label>
+        <label class="chip-btn">${s.tab ? 'Replace tab' : 'Add tab'}<input type="file" accept=".gp,.gp3,.gp4,.gp5,.gpx,.xml,.musicxml,.mxl,.zip" /></label>
         <button class="chip-btn del">Delete</button>
       </div>`;
     li.querySelector('b').textContent = s.title;
@@ -191,11 +194,15 @@ async function openSong(id) {
     if (song.tab) {
       busy('Drawing the tab…');
       const blob = await lib.getFile(song.id, song.tab);
+      gpView.destroy(); pdfView.destroy();
+      tab = /\.json$/i.test(song.tab) ? pdfView : gpView;
       tab.layout = globalPrefs.layout;
       tab.scale = globalPrefs.scale;
-      $('#tabHost').classList.toggle('horizontal', globalPrefs.layout === 'horizontal');
+      $('#tabHost').classList.toggle('horizontal', tab === gpView && globalPrefs.layout === 'horizontal');
       try {
-        const info = await withTimeout(tab.load(await blob.arrayBuffer(), p.trackIndex ?? null), 30000);
+        const info = tab === pdfView
+          ? await withTimeout(pdfView.load(JSON.parse(await blob.text()), p.trackIndex ?? null, (path) => lib.getFile(song.id, path)), 30000)
+          : await withTimeout(gpView.load(await blob.arrayBuffer(), p.trackIndex ?? null), 30000);
         barDefs = info.barDefs;
         const alignKey = `${song.tab}:${barDefs.length}`;
         if (song.sync.alignedFor !== alignKey && song.beats?.length > 8) {
@@ -212,11 +219,11 @@ async function openSong(id) {
       } catch (err) {
         console.error(err);
         toast(`The tab file couldn't be read: ${err.message || err}`, 7000);
-        tab.destroy();
+        gpView.destroy(); pdfView.destroy();
         $('#tabHost').innerHTML = '';
       }
     } else {
-      tab.destroy();
+      gpView.destroy(); pdfView.destroy();
       $('#tabHost').innerHTML = '';
     }
     renderTrackSelect();
@@ -269,8 +276,8 @@ $('#trackSelect').addEventListener('change', (e) => {
   saveSongSoon();
   tab.setTrack(i);
 });
-tab.addEventListener('rendered', () => { lastUi.mi = -1; showLoopOnTab(); });
-tab.addEventListener('barclick', (e) => {
+for (const v of [gpView, pdfView]) v.addEventListener('rendered', () => { lastUi.mi = -1; showLoopOnTab(); });
+const onBarClick = (e) => {
   if (!tl) return;
   const { masterIndex, frac } = e.detail;
   const cur = tl.barAt(engine.position);
@@ -286,7 +293,8 @@ tab.addEventListener('barclick', (e) => {
     const b = tl.bars[best];
     engine.seek(b.start + frac * (b.end - b.start));
   }
-});
+};
+for (const v of [gpView, pdfView]) v.addEventListener('barclick', onBarClick);
 
 // ---------------- timeline / sections ----------------
 
@@ -705,4 +713,4 @@ requestAnimationFrame(frame);
 })();
 
 // expose for debugging / tests
-window.__gpp = { engine, tab, get tl() { return tl; }, get song() { return song; }, openSong };
+window.__gpp = { engine, get tab() { return tab; }, get tl() { return tl; }, get song() { return song; }, openSong };

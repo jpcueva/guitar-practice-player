@@ -132,13 +132,37 @@ export async function importFiles(files, { decode, onStatus }) {
 }
 
 export async function attachTab(songId, file) {
-  if (!TAB_RE.test(file.name)) throw new Error('That is not a tab file. Use Guitar Pro (.gp, .gp5, .gpx) or MusicXML.');
   const song = await lib.getSong(songId);
-  const path = `tab${file.name.match(/\.[a-z0-9]+$/i)[0].toLowerCase()}`;
-  await lib.putFiles(songId, [{ path, blob: file }]);
-  song.tab = path;
+  if (/\.zip$/i.test(file.name)) {
+    // PDF tab bundle from tools/pdf_tab_bundle.py
+    const zip = await window.JSZip.loadAsync(file);
+    const jsonEntry = zip.file('tab.json');
+    if (!jsonEntry) throw new Error('That .zip is not a tab bundle (no tab.json inside).');
+    const bundle = JSON.parse(await jsonEntry.async('text'));
+    if (bundle.kind !== 'pdf-tab') throw new Error('Unknown tab bundle.');
+    const files = [{ path: 'tab.json', blob: new Blob([JSON.stringify(bundle)], { type: 'application/json' }) }];
+    let bytes = 0;
+    for (const part of bundle.parts) {
+      for (const pg of part.pages) {
+        const e = zip.file(pg.file);
+        if (!e) throw new Error(`The bundle is missing ${pg.file}.`);
+        const blob = await e.async('blob');
+        bytes += blob.size;
+        files.push({ path: pg.file, blob: new Blob([blob], { type: 'image/webp' }) });
+      }
+    }
+    await lib.putFiles(songId, files);
+    song.tab = 'tab.json';
+    song.bytes = (song.bytes || 0) + bytes;
+  } else {
+    if (!TAB_RE.test(file.name)) throw new Error('That is not a tab file. Use Guitar Pro (.gp, .gp5, .gpx), MusicXML, or a PDF tab bundle (.zip).');
+    const path = `tab${file.name.match(/\.[a-z0-9]+$/i)[0].toLowerCase()}`;
+    await lib.putFiles(songId, [{ path, blob: file }]);
+    song.tab = path;
+    song.bytes = (song.bytes || 0) + file.size;
+  }
   if (song.sync) song.sync.alignedFor = null;
-  song.bytes = (song.bytes || 0) + file.size;
+  song.prefs = { ...(song.prefs || {}), trackIndex: null };
   await lib.putSong(song);
   return song;
 }

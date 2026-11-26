@@ -30,9 +30,18 @@ You need `ffmpeg` and `numpy` installed. The script converts each stem to AAC an
 
 **B. Direct import.** Pick the Moises `.zip`, or all its WAV files, in **Add song**. The app finds the beats from the metronome stem itself. This is fine on a computer, but heavy on a phone.
 
+**PDF tabs (no Guitar Pro file).** Songsterr-style PDF exports can be turned into a tab bundle that the app follows along with. It shows your original pages and moves a cursor through each bar:
+
+```bash
+python tools/pdf_tab_bundle.py --out like-light-to-the-flies-tabs.zip \
+    "Rhythm guitar 1=rhythm_guitar_1.pdf" "Lead guitar=lead_guitar.pdf"
+```
+
+The script reads the bar numbers, section names and tempo marks from the PDF. It needs poppler (`pdftotext`, `pdftoppm`) and Pillow. Add the `.zip` with **☰ → Add tab**.
+
 ### Lining the tab up with the recording
 
-The metronome stem gives the beat times, and the tab gives the bars and time signatures. If the cursor runs a beat or a bar ahead or behind, open **⚙ Sync & display** and move "Bar 1 starts on beat". Use "Fine tune" for small offsets. These settings are saved for each song.
+Lining up happens automatically. The app steps through the tab's beats using its tempo map, snapping each beat to the nearest click in the Moises metronome stem. This copes with the metronome clicking double-time or triplets in some sections. It then picks the bar 1 position that matches the most clicks. If the cursor still runs a beat or a bar off, open **⚙ Sync & display** and move "Bar 1 starts on beat", or use "Fine tune". These settings are saved for each song.
 
 ## Where things are stored
 
@@ -48,10 +57,12 @@ Plain HTML, CSS and ES modules, with no build step.
 | `js/timeline.js` | Maps bars to times in the recording using the beat grid |
 | `js/beats.js` | Finds the beats in a Moises metronome stem |
 | `js/tab.js` | alphaTab rendering, cursor, repeat expansion, tap-to-seek |
+| `js/pdftab.js` | Follow-along view for PDF tab bundles |
 | `js/importer.js` | Reads packages, Moises zips and loose files |
 | `js/library.js` | Offline song storage (IndexedDB) |
 | `js/app.js` | UI |
 | `tools/make_song_package.py` | Builds compressed song packages |
+| `tools/pdf_tab_bundle.py` | Turns PDF tabs into a follow-along bundle |
 
 **How tempo keeps the pitch:** every stem plays at the same `playbackRate` (they stay sample-locked), then the mixed signal goes through a [Signalsmith Stretch](https://signalsmith-audio.co.uk/code/stretch/) pitch shifter that undoes the pitch change. At 100% the shifter is bypassed.
 
