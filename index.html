@@ -134,7 +134,11 @@
   <div id="settings" class="sheet" hidden>
     <div class="sheet-head"><h2>Sync &amp; display</h2><button class="icon-btn close" data-close>✕</button></div>
     <h3>Line the tab up with the recording</h3>
-    <p class="hint">If the cursor is ahead of or behind the music, move where bar 1 starts. Play the start of the song with the click on to check.</p>
+    <p class="hint">The app lines the tab up with the recording using the tab's tempo changes and the metronome track. If the cursor is still a beat or a bar off, move where bar 1 starts. Turn the click on to check.</p>
+    <div class="row-ctl" id="autoRow">
+      <button class="chip-btn" id="btnAutoAlign">Line up automatically</button>
+      <span class="hint" id="alignScore"></span>
+    </div>
     <div class="row-ctl">
       <span>Bar 1 starts on beat</span>
       <button class="chip-btn" data-offset="-4">−1 bar</button>

@@ -1,5 +1,5 @@
 import { Engine } from './engine.js';
-import { buildTimeline } from './timeline.js';
+import { buildTimeline, autoOffset } from './timeline.js';
 import { TabView } from './tab.js';
 import * as lib from './library.js';
 import { importFiles, attachTab } from './importer.js';
@@ -197,6 +197,15 @@ async function openSong(id) {
       try {
         const info = await withTimeout(tab.load(await blob.arrayBuffer(), p.trackIndex ?? null), 30000);
         barDefs = info.barDefs;
+        const alignKey = `${song.tab}:${barDefs.length}`;
+        if (song.sync.alignedFor !== alignKey && song.beats?.length > 8) {
+          const r = autoOffset(song.beats, barDefs);
+          song.sync.barOffset = r.offset;
+          song.sync.nudgeMs = 0;
+          song.sync.alignedFor = alignKey;
+          song.sync.alignScore = Math.round((r.matched / r.total) * 100);
+          saveSongSoon();
+        }
         tracks = info.tracks;
         p.trackIndex = info.trackIndex;
         if (!song.artist && info.artist) { song.artist = info.artist; $('#songSub').textContent = [song.artist, song.key].filter(Boolean).join(' · '); }
@@ -292,7 +301,7 @@ function rebuildTimeline() {
     sections: song.sections || [],
     nudge,
   });
-  engine.setBeatGrid((song.beats || []).map(b => b + nudge), tl.downbeats);
+  engine.setBeatGrid(tl.grid, tl.downbeats);
   renderSections();
   renderProgressSections();
   lastUi = {};
@@ -564,6 +573,8 @@ function renderSettings() {
   $('#nudgeVal').textContent = `${song ? song.sync.nudgeMs || 0 : 0} ms`;
   $('#bpbVal').textContent = song ? song.sync.beatsPerBar || 4 : 4;
   $('#bpbRow').hidden = !!barDefs;
+  $('#autoRow').hidden = !barDefs;
+  $('#alignScore').textContent = barDefs && song?.sync.alignScore != null ? `${song.sync.alignScore}% of the tab's beats match a click in the recording.` : '';
   $('#zoomVal').textContent = `${Math.round(globalPrefs.scale * 100)}%`;
   document.querySelectorAll('[data-layout]').forEach(b => setPressed(b, b.dataset.layout === globalPrefs.layout));
   $('#optStereo').checked = !!globalPrefs.stereo;
@@ -583,6 +594,15 @@ document.querySelectorAll('[data-bpb]').forEach(b => b.addEventListener('click',
   song.sync.beatsPerBar = Math.max(1, Math.min(12, (song.sync.beatsPerBar || 4) + +b.dataset.bpb));
   resync();
 }));
+$('#btnAutoAlign').addEventListener('click', () => {
+  if (!song || !barDefs || !song.beats?.length) return toast('Auto line-up needs a tab and the metronome track.');
+  const r = autoOffset(song.beats, barDefs);
+  song.sync.barOffset = r.offset;
+  song.sync.nudgeMs = 0;
+  song.sync.alignScore = Math.round((r.matched / r.total) * 100);
+  resync();
+  toast(`Lined up: ${song.sync.alignScore}% of the tab's beats match the recording.`);
+});
 function resync() {
   const pos = engine.position;
   const keepLoop = engine.loop.enabled;

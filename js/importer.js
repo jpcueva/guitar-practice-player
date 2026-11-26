@@ -137,6 +137,7 @@ export async function attachTab(songId, file) {
   const path = `tab${file.name.match(/\.[a-z0-9]+$/i)[0].toLowerCase()}`;
   await lib.putFiles(songId, [{ path, blob: file }]);
   song.tab = path;
+  if (song.sync) song.sync.alignedFor = null;
   song.bytes = (song.bytes || 0) + file.size;
   await lib.putSong(song);
   return song;

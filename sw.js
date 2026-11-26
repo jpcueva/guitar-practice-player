@@ -1,5 +1,5 @@
 // Offline cache for the app itself (songs live in IndexedDB, not here).
-const VERSION = 'gpp-v1';
+const VERSION = 'gpp-v2';
 const ASSETS = [
   './', 'index.html', 'css/app.css', 'manifest.webmanifest',
   'js/app.js', 'js/engine.js', 'js/timeline.js', 'js/tab.js', 'js/library.js', 'js/importer.js', 'js/beats.js',

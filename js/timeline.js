@@ -18,47 +18,61 @@ import { lowerBound } from './engine.js';
  */
 export function buildTimeline({ beats, barDefs, barOffset = 0, beatsPerBar = 4, duration, sections = [], nudge = 0 }) {
   const B = beats.length ? beats : synthBeats(duration, 120);
-  const beatAt = (k) => {
-    const n = B.length;
-    let t;
-    if (n === 1) t = B[0] + k * 0.5;
-    else if (k < 0) t = B[0] + k * (B[1] - B[0]);
-    else if (k >= n - 1) {
-      const span = Math.min(8, n - 1);
-      const avg = (B[n - 1] - B[n - 1 - span]) / span;
-      t = B[n - 1] + (k - (n - 1)) * avg;
-    } else {
-      const i = Math.floor(k), f = k - i;
-      t = B[i] + f * (B[i + 1] - B[i]);
-    }
-    return t + nudge;
-  };
-
-  let defs = barDefs;
-  if (!defs) {
-    const count = Math.max(1, Math.ceil((B.length - barOffset) / beatsPerBar));
-    defs = Array.from({ length: count }, (_, i) => ({ masterIndex: i, number: i + 1, beats: beatsPerBar, section: null }));
-  }
-
   const bars = [];
-  let k = barOffset;
-  for (let i = 0; i < defs.length; i++) {
-    const d = defs[i];
-    const start = beatAt(k);
-    const beatTimes = [];
-    const whole = Math.ceil(d.beats - 1e-6);
-    for (let j = 0; j <= whole; j++) beatTimes.push(beatAt(k + Math.min(j, d.beats)));
-    const end = beatAt(k + d.beats);
-    bars.push({
-      i, masterIndex: d.masterIndex, number: d.number, beats: d.beats,
-      start, end, beatTimes, section: d.section || null,
-      firstBeatIndex: Number.isInteger(k) ? k : null,
-    });
-    k += d.beats;
-    if (!barDefs && start > duration) break;
+  let grid, downbeats;
+
+  if (barDefs && barDefs.length && B.length > 2) {
+    // Tab mode: walk the tab's beats through the clicks, guided by the tab's tempo map.
+    const { units, barUnit } = tabUnits(barDefs);
+    const { times } = alignBeats(B, units, barOffset);
+    for (let i = 0; i < barDefs.length; i++) {
+      const d = barDefs[i];
+      const u0 = barUnit[i], u1 = barUnit[i + 1];
+      const beatTimes = times.slice(u0, u1 + 1).map(t => t + nudge);
+      bars.push({
+        i, masterIndex: d.masterIndex, number: d.number, beats: d.beats,
+        start: beatTimes[0], end: beatTimes[beatTimes.length - 1], beatTimes, section: d.section || null,
+      });
+    }
+    grid = times.map(t => t + nudge);
+    downbeats = barUnit.slice(0, -1);
+  } else {
+    const beatAt = (k) => {
+      const n = B.length;
+      let t;
+      if (n === 1) t = B[0] + k * 0.5;
+      else if (k < 0) t = B[0] + k * (B[1] - B[0]);
+      else if (k >= n - 1) {
+        const span = Math.min(8, n - 1);
+        const avg = (B[n - 1] - B[n - 1 - span]) / span;
+        t = B[n - 1] + (k - (n - 1)) * avg;
+      } else {
+        const i = Math.floor(k), f = k - i;
+        t = B[i] + f * (B[i + 1] - B[i]);
+      }
+      return t + nudge;
+    };
+    const defs = barDefs && barDefs.length ? barDefs : Array.from(
+      { length: Math.max(1, Math.ceil((B.length - barOffset) / beatsPerBar)) },
+      (_, i) => ({ masterIndex: i, number: i + 1, beats: beatsPerBar, section: null }));
+    let k = barOffset;
+    downbeats = [];
+    for (let i = 0; i < defs.length; i++) {
+      const d = defs[i];
+      const beatTimes = [];
+      const whole = Math.ceil(d.beats - 1e-6);
+      for (let j = 0; j <= whole; j++) beatTimes.push(beatAt(k + Math.min(j, d.beats)));
+      if (Number.isInteger(k) && k >= 0) downbeats.push(k);
+      bars.push({
+        i, masterIndex: d.masterIndex, number: d.number, beats: d.beats,
+        start: beatTimes[0], end: beatTimes[beatTimes.length - 1], beatTimes, section: d.section || null,
+      });
+      k += d.beats;
+      if (!barDefs && beatTimes[0] > duration) break;
+    }
+    while (!barDefs && bars.length > 1 && bars[bars.length - 1].start >= duration) bars.pop();
+    grid = B.map(t => t + nudge);
   }
-  // Drop bars entirely past the end of the audio (no-tab mode).
-  while (!barDefs && bars.length > 1 && bars[bars.length - 1].start >= duration) bars.pop();
 
   // Sections: from the tab, else from song.json, else 8-bar blocks.
   const named = bars.some(b => b.section);
@@ -82,11 +96,8 @@ export function buildTimeline({ beats, barDefs, barOffset = 0, beatsPerBar = 4, 
     };
   });
 
-  // Beat indexes that start a bar (for the accented click).
-  const downbeats = bars.map(b => b.firstBeatIndex).filter(x => x !== null && x >= 0);
-
   return {
-    bars, sections: secs, downbeats,
+    bars, sections: secs, grid, downbeats,
     barAt(t) {
       if (!bars.length) return -1;
       let lo = 0, hi = bars.length - 1;
@@ -126,4 +137,73 @@ export function beatsForSignature(num, den) {
   if (den <= 4) return num * (4 / den);
   if (den === 8 && num % 3 === 0 && num >= 6) return num / 3; // compound: dotted quarters
   return num * (4 / den);
+}
+
+/**
+ * Expected length (s) of every beat in the tab, from its tempo map.
+ * units[k] = duration of beat k; barUnit[i] = index of bar i's first beat (length bars+1).
+ */
+export function tabUnits(barDefs) {
+  const units = [], barUnit = [];
+  for (const d of barDefs) {
+    barUnit.push(units.length);
+    const quarter = 60 / (d.tempo || 120);
+    const beatLen = (d.quarters || d.beats) * quarter / d.beats;
+    const whole = Math.floor(d.beats + 1e-6);
+    for (let j = 0; j < whole; j++) units.push(beatLen);
+    const frac = d.beats - whole;
+    if (frac > 1e-6) units.push(frac * beatLen);
+  }
+  barUnit.push(units.length);
+  return { units, barUnit };
+}
+
+/**
+ * Walk the tab's beats through the metronome clicks. Each next beat is predicted
+ * from the tab tempo (scaled to how the band actually plays) and snapped to the
+ * nearest click; clicks in between are skipped (double-time clicking) and a
+ * missing click is filled in from the prediction.
+ * @returns {{times:number[], matched:number}} times has units.length + 1 entries
+ */
+export function alignBeats(clicks, units, startIdx = 0) {
+  const times = [];
+  let t = startIdx >= 0 ? clicks[Math.min(startIdx, clicks.length - 1)] : clicks[0] + startIdx * (units[0] || 0.5);
+  let ci = Math.max(0, startIdx) + 1;
+  let scale = 1, matched = 0;
+  times.push(t);
+  for (let k = 0; k < units.length; k++) {
+    const d = units[k] * scale;
+    const pred = t + d;
+    while (ci < clicks.length && clicks[ci] < pred - 0.45 * d) ci++;
+    let best = -1, bd = Infinity;
+    for (let j = ci; j < clicks.length && clicks[j] <= pred + 0.45 * d; j++) {
+      const e = Math.abs(clicks[j] - pred);
+      if (e < bd) { bd = e; best = j; }
+    }
+    let nt = pred;
+    if (best >= 0 && bd < 0.22 * d) {
+      nt = clicks[best];
+      ci = best + 1;
+      matched++;
+      scale = Math.min(1.1, Math.max(0.9, scale * 0.8 + 0.2 * ((nt - t) / units[k])));
+    }
+    times.push(nt);
+    t = nt;
+  }
+  return { times, matched };
+}
+
+/** Pick the click where bar 1 most likely starts: the offset whose walk matches the most clicks. */
+export function autoOffset(clicks, barDefs, maxOffset = 48) {
+  const { units } = tabUnits(barDefs);
+  let best = 0, bestScore = -1;
+  // Try offsets nearest bar 1 = first click first, so ties keep the simplest answer.
+  const offs = [0];
+  for (let k = 1; k <= maxOffset; k++) { offs.push(k); if (k <= 8) offs.push(-k); }
+  for (const off of offs) {
+    if (off > clicks.length - 2) continue;
+    const { matched } = alignBeats(clicks, units, off);
+    if (matched > bestScore + 2) { bestScore = matched; best = off; }
+  }
+  return { offset: best, matched: bestScore, total: units.length };
 }

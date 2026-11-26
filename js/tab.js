@@ -61,10 +61,13 @@ export class TabView extends EventTarget {
         const tracks = score.tracks.map((t, i) => ({
           index: i, name: t.name || `Track ${i + 1}`,
           strings: t.staves[0]?.tuning?.length || 0,
-          isGuitar: (t.staves[0]?.tuning?.length || 0) >= 6,
+          isGuitar: (t.staves[0]?.tuning?.length || 0) >= 6 && !t.staves[0]?.isPercussion && (t.staves[0]?.tuning?.[0] || 0) > 0,
         }));
         if (trackIndex === null || !score.tracks[trackIndex]) {
-          const g = tracks.find(t => t.isGuitar) || tracks[0];
+          // default to the guitar part with the most notes (the main riff, not an intro-only part)
+          const notes = (t) => { let n = 0; for (const b of t.staves[0]?.bars || []) for (const bt of b.voices[0]?.beats || []) if (!bt.isRest) n++; return n; };
+          const guitars = tracks.filter(t => t.isGuitar);
+          const g = guitars.sort((a, b) => notes(score.tracks[b.index]) - notes(score.tracks[a.index]))[0] || tracks[0];
           trackIndex = g ? g.index : 0;
         }
         this.trackIndex = trackIndex;
@@ -111,18 +114,7 @@ export class TabView extends EventTarget {
 
   /** Bars in playback order (repeats and alternate endings expanded). */
   barDefs() {
-    const mbs = this.score.masterBars;
-    const order = expandRepeats(mbs);
-    return order.map((mi) => {
-      const mb = mbs[mi];
-      return {
-        masterIndex: mi,
-        number: mi + 1,
-        beats: beatsForSignature(mb.timeSignatureNumerator, mb.timeSignatureDenominator),
-        ticks: mb.calculateDuration ? mb.calculateDuration() : 3840 * mb.timeSignatureNumerator / mb.timeSignatureDenominator,
-        section: mb.section ? (mb.section.text || mb.section.marker || 'Section') : null,
-      };
-    });
+    return scoreBarDefs(this.score);
   }
 
   _attachOverlay() {
@@ -266,4 +258,29 @@ export function expandRepeats(mbs) {
     i++;
   }
   return order;
+}
+
+/** Bars in playback order with time signature, tempo and section, for the timeline. */
+export function scoreBarDefs(score) {
+  const mbs = score.masterBars;
+  const tempoAt = [];
+  let tempo = score.tempo || 120;
+  for (const mb of mbs) {
+    const a = (mb.tempoAutomations || [])[0] || mb.tempoAutomation;
+    if (a && a.value) tempo = a.value;
+    tempoAt.push(tempo);
+  }
+  return expandRepeats(mbs).map((mi) => {
+    const mb = mbs[mi];
+    const num = mb.timeSignatureNumerator, den = mb.timeSignatureDenominator;
+    const name = mb.section ? (mb.section.text || '').trim() : '';
+    return {
+      masterIndex: mi,
+      number: mi + 1,
+      beats: beatsForSignature(num, den),
+      quarters: num * 4 / den,
+      tempo: tempoAt[mi],
+      section: name || null,
+    };
+  });
 }
