@@ -5,6 +5,7 @@ A practice app for playing along with songs, in the spirit of Moises, with the g
 - **Stem mixer:** plays every stem (lead, rhythm, bass, drums, vocals, other) in sync, with mute, solo and volume.
 - **Tempo:** 50–125% without changing the pitch.
 - **Loops:** tap a section (Verse, Chorus, Solo…) to jump and select it, long-press another section to extend the selection, or set A/B at any bar.
+- **Sections:** taken from the tab's section marks. Songs whose tab has none get a built-in map (`js/known-sections.js`), and you can rename or add sections under **⚙ Settings → Sections**.
 - **Tab:** Guitar Pro or MusicXML tabs, with a cursor that follows the recording, a track picker, and page or one-line layout. Tap a bar to jump to it.
 - **Click and count-in:** a metronome on the song's real beat grid, which follows its tempo changes.
 
@@ -41,7 +42,7 @@ The script reads the bar numbers, section names and tempo marks from the PDF. It
 
 ### Lining the tab up with the recording
 
-Lining up happens automatically. The app steps through the tab's beats using its tempo map, snapping each beat to the nearest click in the Moises metronome stem. This copes with the metronome clicking double-time or triplets in some sections. It then picks the bar 1 position that matches the most clicks. If the cursor still runs a beat or a bar off, open **⚙ Sync & display** and move "Bar 1 starts on beat", or use "Fine tune". These settings are saved for each song.
+Lining up happens automatically. The app steps through the tab's beats using its tempo map, snapping each beat to the nearest click in the Moises metronome stem. This copes with the metronome clicking double-time or triplets in some sections. It then picks the bar 1 position that matches the most clicks. If the cursor still runs a beat or a bar off, open **⚙ Settings** and move "Bar 1 starts on beat", or use "Fine tune". These settings are saved for each song.
 
 ## Where things are stored
 
@@ -60,6 +61,7 @@ Plain HTML, CSS and ES modules, with no build step.
 | `js/pdftab.js` | Follow-along view for PDF tab bundles |
 | `js/importer.js` | Reads packages, Moises zips and loose files |
 | `js/library.js` | Offline song storage (IndexedDB) |
+| `js/known-sections.js` | Section maps for tabs without section marks |
 | `js/app.js` | UI |
 | `tools/make_song_package.py` | Builds compressed song packages |
 | `tools/pdf_tab_bundle.py` | Turns PDF tabs into a follow-along bundle |

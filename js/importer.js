@@ -163,6 +163,7 @@ export async function attachTab(songId, file) {
   }
   if (song.sync) song.sync.alignedFor = null;
   song.prefs = { ...(song.prefs || {}), trackIndex: null };
+  delete song.customSections; // bar numbers belong to the old tab
   await lib.putSong(song);
   return song;
 }

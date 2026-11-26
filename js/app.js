@@ -4,6 +4,7 @@ import { TabView } from './tab.js';
 import { PdfTabView } from './pdftab.js';
 import * as lib from './library.js';
 import { importFiles, attachTab } from './importer.js';
+import { KNOWN_SECTIONS } from './known-sections.js';
 
 const $ = (s) => document.querySelector(s);
 const STEM_COLORS = ['#f59e0b', '#fb7185', '#34d399', '#60a5fa', '#a78bfa', '#f472b6', '#22d3ee', '#facc15', '#94a3b8'];
@@ -306,7 +307,7 @@ function rebuildTimeline() {
     barOffset: song.sync.barOffset || 0,
     beatsPerBar: song.sync.beatsPerBar || 4,
     duration: engine.duration,
-    sections: song.sections || [],
+    ...sectionSource(),
     nudge,
   });
   engine.setBeatGrid(tl.grid, tl.downbeats);
@@ -314,6 +315,15 @@ function rebuildTimeline() {
   renderProgressSections();
   lastUi = {};
   if (loopSel && !tl.bars[loopSel.endBar]) loopSel = null;
+}
+
+/** Which section list to use: the user's edits, the tab's marks, a known map, or song.json. */
+function sectionSource() {
+  if (song.customSections?.length) return { sections: song.customSections, overrideSections: true };
+  const known = KNOWN_SECTIONS[song.id];
+  const tabNamed = barDefs?.some(b => b.section);
+  if (known && !tabNamed && barDefs?.length === known.bars) return { sections: known.sections };
+  return { sections: song.sections || [] };
 }
 
 function renderSections() {
@@ -586,7 +596,78 @@ function renderSettings() {
   $('#zoomVal').textContent = `${Math.round(globalPrefs.scale * 100)}%`;
   document.querySelectorAll('[data-layout]').forEach(b => setPressed(b, b.dataset.layout === globalPrefs.layout));
   $('#optStereo').checked = !!globalPrefs.stereo;
+  renderSectionEditor();
 }
+
+// ---------------- section editor ----------------
+
+function editableSections() {
+  return tl.sections.filter(s => !s.generic).map(s => ({ bar: s.startBar + 1, name: s.name }));
+}
+
+function saveSections(list) {
+  list.sort((a, b) => a.bar - b.bar);
+  song.customSections = list.filter((s, i) => i === 0 || s.bar !== list[i - 1].bar);
+  saveSongSoon();
+  rebuildTimeline();
+  renderSectionEditor();
+}
+
+function renderSectionEditor() {
+  const host = $('#secEdit');
+  host.innerHTML = '';
+  $('#btnSecReset').hidden = !song?.customSections;
+  if (!song || !tl) return;
+  const list = editableSections();
+  if (!list.length) {
+    host.innerHTML = '<p class="hint">No named sections yet. Play or tap to the bar where a section starts, then add it.</p>';
+    return;
+  }
+  list.forEach((s, i) => {
+    const row = document.createElement('div');
+    row.className = 'sec-row';
+    row.innerHTML = `<span class="sec-bar"></span><input type="text" maxlength="24" aria-label="Section name"><button class="icon-btn" aria-label="Remove section">✕</button>`;
+    row.style.setProperty('--c', SECTION_COLORS[tl.sections.findIndex(x => x.startBar === s.bar - 1) % SECTION_COLORS.length]);
+    row.querySelector('.sec-bar').textContent = `Bar ${s.bar}`;
+    const inp = row.querySelector('input');
+    inp.value = s.name;
+    inp.addEventListener('change', () => {
+      const l = editableSections();
+      l[i].name = inp.value.trim() || 'Section';
+      saveSections(l);
+    });
+    row.querySelector('button').addEventListener('click', () => {
+      const l = editableSections();
+      l.splice(i, 1);
+      if (!l.length) { delete song.customSections; saveSongSoon(); rebuildTimeline(); renderSectionEditor(); return; }
+      saveSections(l);
+    });
+    host.appendChild(row);
+  });
+}
+
+$('#btnSecAdd').addEventListener('click', () => {
+  if (!song || !tl) return;
+  const bar = currentBar() + 1;
+  const l = editableSections();
+  const existing = l.find(s => s.bar === bar);
+  if (existing) return toast(`"${existing.name}" already starts at bar ${bar}.`);
+  if (!l.length && bar > 1) l.push({ bar: 1, name: 'Start' });
+  l.push({ bar, name: 'New section' });
+  saveSections(l);
+  const rows = [...document.querySelectorAll('#secEdit .sec-row')];
+  const row = rows.find(r => r.querySelector('.sec-bar').textContent === `Bar ${bar}`);
+  if (row) { const inp = row.querySelector('input'); inp.focus(); inp.select(); }
+});
+
+$('#btnSecReset').addEventListener('click', () => {
+  if (!song) return;
+  delete song.customSections;
+  saveSongSoon();
+  rebuildTimeline();
+  renderSectionEditor();
+  toast('Sections reset.');
+});
 document.querySelectorAll('[data-offset]').forEach(b => b.addEventListener('click', () => {
   if (!song) return;
   song.sync.barOffset = (song.sync.barOffset || 0) + +b.dataset.offset;
