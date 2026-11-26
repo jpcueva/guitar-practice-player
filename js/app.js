@@ -11,6 +11,11 @@ const STEM_COLORS = ['#f59e0b', '#fb7185', '#34d399', '#60a5fa', '#a78bfa', '#f4
 const SECTION_COLORS = ['#f59e0b', '#60a5fa', '#34d399', '#fb7185', '#a78bfa', '#22d3ee', '#f472b6', '#facc15'];
 const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
+// iOS greys out files whose extension it doesn't know (.gp4, .gp5, .gpx…) when a
+// picker has an accept filter, so on iOS pickers allow any file and the app checks it.
+const TAB_ACCEPT = isIOS ? '' : 'accept=".gp,.gp3,.gp4,.gp5,.gpx,.xml,.musicxml,.mxl,.zip"';
+if (isIOS) document.querySelectorAll('input[type=file]').forEach(i => i.removeAttribute('accept'));
+
 const globalPrefs = loadGlobalPrefs();
 const engine = new Engine();
 const gpView = new TabView($('#tabHost'), $('#tabScroll'));
@@ -101,7 +106,7 @@ async function renderLibrary() {
     li.innerHTML = `
       <button class="song-open"><b></b><small></small></button>
       <div class="song-actions">
-        <label class="chip-btn">${s.tab ? 'Replace tab' : 'Add tab'}<input type="file" accept=".gp,.gp3,.gp4,.gp5,.gpx,.xml,.musicxml,.mxl,.zip" /></label>
+        <label class="chip-btn">${s.tab ? 'Replace tab' : 'Add tab'}<input type="file" ${TAB_ACCEPT} /></label>
         <button class="chip-btn del">Delete</button>
       </div>`;
     li.querySelector('b').textContent = s.title;
