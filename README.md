@@ -31,7 +31,7 @@ python tools/make_song_package.py "Like Light to the Flies-D minor-106bpm-441hz.
 
 You need `ffmpeg` and `numpy` installed. The script converts each stem to FLAC (or AAC) and turns the metronome stem into a beat grid. Adding a package for a song that's already in the app replaces its audio, and keeps a tab you attached and your settings.
 
-The app plays from decoded audio in memory, so FLAC and AAC use the same memory while playing. On an iPhone the stems are mixed down to mono by default to save memory. Turn on **⚙ Settings → Keep stereo** for full stereo, and turn it off again if the app reloads on its own.
+The app plays from decoded audio in memory, so FLAC and AAC use the same memory while playing. Stems are kept as 16-bit samples and played by an AudioWorklet, which halves memory compared with Web Audio buffers, so every device plays in stereo by default. If an iPhone runs out of memory while loading a song, the app notices on the next launch, switches **⚙ Settings → Keep stereo** off (mono) and says so.
 
 **B. Direct import.** Pick the Moises `.zip`, or all its WAV files, in **Add song**. The app finds the beats from the metronome stem itself. This is fine on a computer, but heavy on a phone.
 

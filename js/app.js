@@ -17,6 +17,10 @@ const TAB_ACCEPT = isIOS ? '' : 'accept=".gp,.gp3,.gp4,.gp5,.gpx,.xml,.musicxml,
 if (isIOS) document.querySelectorAll('input[type=file]').forEach(i => i.removeAttribute('accept'));
 
 const globalPrefs = loadGlobalPrefs();
+saveGlobalPrefs();
+if (globalPrefs.stereoFellBack) {
+  setTimeout(() => toast("The last song didn't finish loading in stereo (the iPhone ran out of memory), so the app switched to mono. You can turn Keep stereo back on in Settings.", 9000), 1500);
+}
 const engine = new Engine();
 const gpView = new TabView($('#tabHost'), $('#tabScroll'));
 const pdfView = new PdfTabView($('#tabHost'), $('#tabScroll'));
@@ -33,8 +37,20 @@ let lastUi = {};
 // ---------------- helpers ----------------
 
 function loadGlobalPrefs() {
-  const d = { layout: 'page', scale: window.innerWidth < 500 ? 0.9 : 1, stereo: !isIOS, lastSong: null };
-  try { return { ...d, ...JSON.parse(localStorage.getItem('gpp.prefs') || '{}') }; } catch { return d; }
+  const d = { layout: 'page', scale: window.innerWidth < 500 ? 0.9 : 1, stereo: true, lastSong: null };
+  let p;
+  try { p = { ...d, ...JSON.parse(localStorage.getItem('gpp.prefs') || '{}') }; } catch { p = { ...d }; }
+  // Stereo used to be off by default on iPhones. Stems that are nearly mono are now
+  // stored as mono anyway, which leaves room for stereo, so turn it on once.
+  if (!p.stereoV2) { p.stereo = true; p.stereoV2 = true; }
+  // If the app died while loading a song in stereo (the iPhone ran out of memory
+  // and reloaded the page), fall back to mono instead of crashing again.
+  try {
+    const crashed = JSON.parse(localStorage.getItem('gpp.loading') || 'null');
+    localStorage.removeItem('gpp.loading');
+    if (crashed?.stereo) { p.stereo = false; p.stereoFellBack = true; }
+  } catch {}
+  return p;
 }
 function saveGlobalPrefs() { try { localStorage.setItem('gpp.prefs', JSON.stringify(globalPrefs)); } catch {} }
 
@@ -192,10 +208,12 @@ async function openSong(id) {
       const sp = p.stems?.[s.id] || {};
       stems.push({ id: s.id, name: s.name, blob, volume: sp.volume ?? 1, muted: sp.muted, solo: sp.solo });
     }
+    try { localStorage.setItem('gpp.loading', JSON.stringify({ id: song.id, stereo: !!globalPrefs.stereo })); } catch {}
     await engine.loadStems(stems, {
       mono: !globalPrefs.stereo,
       onProgress: (i, n, name) => busy(i < n ? `Loading audio ${i + 1}/${n}: ${name}…` : 'Almost ready…'),
     });
+    try { localStorage.removeItem('gpp.loading'); } catch {}
     engine.setMediaInfo(song.title, song.artist);
 
     barDefs = null;
@@ -846,6 +864,7 @@ function renderPartsEditor() {
 }
 $('#optStereo').addEventListener('change', (e) => {
   globalPrefs.stereo = e.target.checked;
+  globalPrefs.stereoFellBack = false;
   saveGlobalPrefs();
   if (song) { toast('Reloading the audio…'); closeSheets(); openSong(song.id); }
 });
