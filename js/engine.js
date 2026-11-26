@@ -74,7 +74,19 @@ export class Engine extends EventTarget {
   async unlock() {
     if (!this.ctx) await this.init();
     if (this.ctx.state !== 'running') {
+      this._started = false; // output was stopped (or interrupted), so it has to wake up again
       try { await this.ctx.resume(); } catch {}
+    }
+    // A silent source keeps the output running between plays, so a later start
+    // is not clipped while the audio hardware wakes up again.
+    if (!this._keepAlive) {
+      try {
+        const k = this.ctx.createConstantSource();
+        k.offset.value = 0;
+        k.connect(this.master);
+        k.start();
+        this._keepAlive = k;
+      } catch {}
     }
     // Older iOS: playing an <audio> element switches the session to "playback",
     // so the silent switch does not mute Web Audio.
@@ -183,7 +195,7 @@ export class Engine extends EventTarget {
   /** Seconds left of the count-in, or 0. */
   get countInRemaining() {
     if (!this.playing) return 0;
-    return Math.max(0, this.anchorCtx - (this.ctx.currentTime - this.outLatency));
+    return Math.max(0, (this._countInEnd || this.anchorCtx) - (this.ctx.currentTime - this.outLatency));
   }
 
   async play({ countInBeats = 0 } = {}) {
@@ -193,14 +205,27 @@ export class Engine extends EventTarget {
     let pos = this.anchorPos;
     if (this.loop.enabled && (pos < this.loop.a || pos >= this.loop.b)) pos = this.loop.a;
     if (pos >= this.duration - 0.05) pos = this.loop.enabled ? this.loop.a : 0;
-    const now = this.ctx.currentTime + 0.06;
-    let countIn = 0;
+    // iOS drops the first moments of output while its audio hardware starts up,
+    // so the very first start gets a longer lead before any sound is scheduled.
+    const lead = this._started ? 0.06 : 0.3;
+    this._started = true;
+    const now = this.ctx.currentTime + lead;
+    this._countInEnd = 0;
     if (countInBeats > 0) {
-      const beatLen = this._beatLengthAt(pos) / this.rate;
-      countIn = beatLen * countInBeats;
-      for (let k = 0; k < countInBeats; k++) this._click(now + k * beatLen + this._clickDelay(), k === 0);
+      // Count in to the next beat of the song (bar 1 often starts a moment into
+      // the recording), so the music comes in exactly on "one" after the count.
+      const i = lowerBound(this.beats, pos - 0.02);
+      const b = this.beats[i];
+      const beatLen = this._beatLengthAt(b ?? pos) / this.rate;
+      // Any recording before that beat plays under the count-in, in time with it.
+      const toBeat = b !== undefined && b >= pos && b - pos < 8 ? (b - pos) / this.rate : 0;
+      const one = now + Math.max(beatLen * countInBeats, toBeat);
+      for (let k = countInBeats; k >= 1; k--) this._click(one - k * beatLen, k === countInBeats);
+      this._countInEnd = one;
+      this._start(pos, one - toBeat);
+      return;
     }
-    this._start(pos, now + countIn);
+    this._start(pos, now);
   }
 
   _start(pos, when) {

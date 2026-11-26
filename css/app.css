@@ -21,8 +21,8 @@ body {
 }
 button, select, input { font: inherit; color: inherit; }
 button { cursor: pointer; }
-svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-svg .fill { fill: currentColor; stroke: none; }
+svg:not(.at-surface-svg) { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+svg:not(.at-surface-svg) .fill { fill: currentColor; stroke: none; }
 [hidden] { display: none !important; }
 
 /* top bar */
@@ -163,3 +163,9 @@ input[type=range]::-moz-range-thumb { width: 20px; height: 20px; border-radius: 
 /* PDF tabs: original pages, inverted to suit the dark theme */
 .pdf-pages { margin: 0 auto; max-width: 100%; }
 .pdf-page { display: block; width: 100%; height: auto; margin: 0 0 10px; border-radius: 6px; filter: invert(.92) hue-rotate(180deg); background: #fff; }
+
+.sec-edit { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+.sec-row { display: flex; align-items: center; gap: 8px; border-left: 4px solid var(--c, #64748b); padding-left: 8px; }
+.sec-row .sec-bar { min-width: 58px; color: var(--muted, #94a3b8); font-size: 13px; font-variant-numeric: tabular-nums; }
+.sec-row input { flex: 1; min-width: 0; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); color: inherit; border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 16px; }
+.sec-row .icon-btn { flex: none; }

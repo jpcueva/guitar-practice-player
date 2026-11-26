@@ -14,9 +14,10 @@ import { lowerBound } from './engine.js';
  * @param {number} o.beatsPerBar       used when there is no tab
  * @param {number} o.duration          audio length (s)
  * @param {Array}  o.sections          fallback sections [{name, bar}] (1-based bar numbers in playback order)
+ * @param {boolean} o.overrideSections use `sections` even when the tab has its own section marks
  * @param {number} o.nudge             seconds added to every beat (fine sync)
  */
-export function buildTimeline({ beats, barDefs, barOffset = 0, beatsPerBar = 4, duration, sections = [], nudge = 0 }) {
+export function buildTimeline({ beats, barDefs, barOffset = 0, beatsPerBar = 4, duration, sections = [], overrideSections = false, nudge = 0 }) {
   const B = beats.length ? beats : synthBeats(duration, 120);
   const bars = [];
   let grid, downbeats;
@@ -74,8 +75,8 @@ export function buildTimeline({ beats, barDefs, barOffset = 0, beatsPerBar = 4, 
     grid = B.map(t => t + nudge);
   }
 
-  // Sections: from the tab, else from song.json, else 8-bar blocks.
-  const named = bars.some(b => b.section);
+  // Sections: the user's own, else from the tab, else from song.json, else 8-bar blocks.
+  const named = !(overrideSections && sections.length) && bars.some(b => b.section);
   let secStarts = [];
   if (named) {
     bars.forEach((b, i) => { if (b.section) secStarts.push({ name: b.section, i }); });

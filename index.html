@@ -24,7 +24,7 @@
       <div id="songSub" class="song-sub">Tap ☰ to add a song</div>
     </div>
     <select id="trackSelect" class="track-select" aria-label="Tab track" hidden></select>
-    <button id="btnSettings" class="icon-btn" aria-label="Settings" title="Sync and display">
+    <button id="btnSettings" class="icon-btn" aria-label="Settings" title="Settings">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
     </button>
   </header>
@@ -132,7 +132,7 @@
 
   <!-- Settings -->
   <div id="settings" class="sheet" hidden>
-    <div class="sheet-head"><h2>Sync &amp; display</h2><button class="icon-btn close" data-close>✕</button></div>
+    <div class="sheet-head"><h2>Settings</h2><button class="icon-btn close" data-close>✕</button></div>
     <h3>Line the tab up with the recording</h3>
     <p class="hint">The app lines the tab up with the recording using the tab's tempo changes and the metronome track. If the cursor is still a beat or a bar off, move where bar 1 starts. Turn the click on to check.</p>
     <div class="row-ctl" id="autoRow">
@@ -158,6 +158,13 @@
       <button class="chip-btn" data-bpb="-1">−</button>
       <b id="bpbVal">4</b>
       <button class="chip-btn" data-bpb="1">+</button>
+    </div>
+    <h3>Sections</h3>
+    <p class="hint">Rename a section, or go to the bar where one starts and add it there. The section buttons and the colours on the progress bar follow these.</p>
+    <div id="secEdit" class="sec-edit"></div>
+    <div class="row-ctl">
+      <button class="chip-btn" id="btnSecAdd">+ Start a section at the current bar</button>
+      <button class="chip-btn" id="btnSecReset" hidden>Reset</button>
     </div>
     <h3>Tab display</h3>
     <div class="row-ctl">
