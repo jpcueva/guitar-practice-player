@@ -14,7 +14,8 @@ export class Engine extends EventTarget {
   constructor() {
     super();
     this.ctx = null;
-    this.stems = [];          // {id, name, buffer, gain, volume, muted, solo}
+    this.stems = [];          // {id, name, gain, channels, pcm|buffer, volume, muted, solo}
+    this.player = null;       // stem-player AudioWorkletNode (when this.pcm)
     this.rate = 1;
     this.playing = false;
     this.anchorCtx = 0;       // ctx time at which anchorPos is heard
@@ -36,8 +37,9 @@ export class Engine extends EventTarget {
     if (this.ctx) return;
     try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch {}
     const AC = window.AudioContext || window.webkitAudioContext;
-    const opts = { latencyHint: 'playback' };
-    if (sampleRate) opts.sampleRate = sampleRate;
+    // Decoded audio is resampled to the context's rate. Song stems are 44.1 kHz, so a
+    // 44.1 kHz context avoids the ~9% extra memory of resampling to 48 kHz.
+    const opts = { latencyHint: 'playback', sampleRate: sampleRate || 44100 };
     try { this.ctx = new AC(opts); } catch { this.ctx = new AC(); }
     const c = this.ctx;
     // A phone call, Siri or another app can interrupt the audio. Pause so the
@@ -78,6 +80,15 @@ export class Engine extends EventTarget {
     } catch (e) {
       console.warn('Pitch-preserving stretch unavailable; tempo will change pitch.', e);
       this.stretch = null;
+    }
+    // Stems play from 16-bit samples in a worklet (half the memory of AudioBuffers,
+    // see stem-player-worklet.js). Without AudioWorklet, fall back to AudioBuffers.
+    try {
+      await c.audioWorklet.addModule(new URL('./stem-player-worklet.js', import.meta.url));
+      this.pcm = true;
+    } catch (e) {
+      console.warn('Stem player worklet unavailable; using AudioBuffers.', e);
+      this.pcm = false;
     }
   }
 
@@ -135,6 +146,11 @@ export class Engine extends EventTarget {
   async loadStems(stems, { mono = false, onProgress } = {}) {
     this.stop();
     for (const s of this.stems) s.gain.disconnect();
+    if (this.player) {
+      this.player.port.postMessage({ type: 'load', stems: [] });
+      this.player.disconnect();
+      this.player = null;
+    }
     this.stems = [];
     this.duration = 0;
     let i = 0;
@@ -146,20 +162,51 @@ export class Engine extends EventTarget {
       } catch (e) {
         throw new Error(`this browser couldn't decode the ${s.name} audio. If the song package uses FLAC, rebuild it with "--codec aac".`);
       }
-      if (mono && buffer.numberOfChannels > 1) buffer = this._downmix(buffer);
+      // A stem whose left and right are (nearly) the same sounds identical in mono
+      // and takes half the memory, which leaves room to keep the others in stereo.
+      if (buffer.numberOfChannels > 1 && (mono || this._nearlyMono(buffer))) buffer = this._downmix(buffer);
       const gain = this.ctx.createGain();
       gain.connect(this.bus);
-      this.stems.push({
-        id: s.id, name: s.name, buffer, gain,
+      const entry = {
+        id: s.id, name: s.name, gain, channels: buffer.numberOfChannels,
         volume: s.volume ?? 1, muted: !!s.muted, solo: !!s.solo,
-      });
+      };
+      if (this.pcm) entry.pcm = toPcm16(buffer); // the float AudioBuffer is dropped here
+      else entry.buffer = buffer;
+      this.stems.push(entry);
       this.duration = Math.max(this.duration, buffer.duration);
+      buffer = null;
       i++;
+      await new Promise(r => setTimeout(r, 0)); // let the float buffer be collected before the next decode
+    }
+    if (this.pcm && this.stems.length) {
+      const n = this.stems.length;
+      const node = new AudioWorkletNode(this.ctx, 'stem-player', {
+        numberOfInputs: 0, numberOfOutputs: n, outputChannelCount: Array(n).fill(2),
+      });
+      this.stems.forEach((st, k) => node.connect(st.gain, k));
+      const payload = this.stems.map(st => ({ channels: st.pcm.channels, length: st.pcm.length }));
+      // Hand the samples to the audio thread; the main thread keeps no copy.
+      node.port.postMessage({ type: 'load', stems: payload }, payload.flatMap(p => p.channels.map(c => c.buffer)));
+      for (const st of this.stems) st.pcm = { length: st.pcm.length };
+      node.port.onmessage = (e) => { if (e.data?.type === 'ended') this._onEnded(); };
+      this.player = node;
     }
     onProgress?.(stems.length, stems.length, '');
     this._applyGains();
     this.anchorPos = 0;
     this.dispatchEvent(new Event('change'));
+  }
+
+  /** True when the side (L−R) signal is under about −40 dB of the mid (L+R). */
+  _nearlyMono(buf) {
+    const L = buf.getChannelData(0), R = buf.getChannelData(1);
+    let mid = 0, side = 0;
+    for (let k = 0; k < L.length; k += 7) {
+      const m = L[k] + R[k], d = L[k] - R[k];
+      mid += m * m; side += d * d;
+    }
+    return mid > 0 && side < mid * 1e-4;
   }
 
   _downmix(buf) {
@@ -260,7 +307,9 @@ export class Engine extends EventTarget {
     this._killSources();
     const c = this.ctx;
     this._setWet();
-    for (const s of this.stems) {
+    if (this.player) {
+      this.player.port.postMessage({ type: 'start', when, pos, rate: this.rate, loop: { ...this.loop } });
+    } else for (const s of this.stems) {
       const src = c.createBufferSource();
       src.buffer = s.buffer;
       src.playbackRate.value = this.rate;
@@ -273,14 +322,7 @@ export class Engine extends EventTarget {
       src.start(when, Math.min(pos, s.buffer.duration));
       this.sources.push(src);
     }
-    this.sources[0].onended = () => {
-      if (this.playing && !this.loop.enabled && this.sources.length && this.position >= this.duration - 0.1) {
-        this.playing = false;
-        this.anchorPos = 0;
-        this._killSources();
-        this.dispatchEvent(new Event('state'));
-      }
-    };
+    if (this.sources[0]) this.sources[0].onended = () => this._onEnded();
     this.anchorPos = pos;
     this.anchorCtx = when;
     this._clickRaw = pos;
@@ -291,7 +333,17 @@ export class Engine extends EventTarget {
     this.dispatchEvent(new Event('state'));
   }
 
+  _onEnded() {
+    if (this.playing && !this.loop.enabled && this.position >= this.duration - 0.1) {
+      this.playing = false;
+      this.anchorPos = 0;
+      this._killSources();
+      this.dispatchEvent(new Event('state'));
+    }
+  }
+
   _killSources() {
+    this.player?.port.postMessage({ type: 'stop' });
     for (const s of this.sources) {
       s.onended = null;
       try { s.stop(); } catch {}
@@ -461,4 +513,19 @@ export function lowerBound(arr, x) {
     if (arr[m] < x) lo = m + 1; else hi = m;
   }
   return lo;
+}
+
+/** AudioBuffer -> {channels: Int16Array[], length}. Lossless for 16-bit sources. */
+function toPcm16(buf) {
+  const channels = [];
+  for (let c = 0; c < buf.numberOfChannels; c++) {
+    const f = buf.getChannelData(c);
+    const d = new Int16Array(f.length);
+    for (let k = 0; k < f.length; k++) {
+      const v = Math.round(f[k] * 32768);
+      d[k] = v > 32767 ? 32767 : v < -32768 ? -32768 : v;
+    }
+    channels.push(d);
+  }
+  return { channels, length: buf.length };
 }
